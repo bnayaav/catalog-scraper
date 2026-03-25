@@ -64,8 +64,15 @@ async function scrapeCData(page) {
 
   try {
     // Login
-    await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'networkidle2', timeout: 30000 });
-    await sleep(3000);
+    await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'load', timeout: 30000 });
+    await sleep(5000);
+    // Check if #Email exists
+    const emailExists = await page.$('#Email');
+    console.log('    C-Data #Email found:', !!emailExists);
+    if (!emailExists) {
+      const pageHtml = await page.evaluate(() => document.body.innerHTML.substring(0, 500));
+      console.log('    Page HTML:', pageHtml);
+    }
     await page.waitForSelector('#Email', { timeout: 20000 });
     await page.click('#Email');
     await page.type('#Email', process.env.SCRAPER_USER || '');
@@ -365,6 +372,12 @@ async function scrapeTechnoRezef(page) {
 
         console.log(`    Techno page ${pageNum}: ${items.length} products`);
         if (items.length === 0) break;
+        // Check if we're getting duplicate content (same page repeating)
+        const firstTitle = items[0]?.title || '';
+        if (pageNum > 1 && products.find(p => p.title === firstTitle)) {
+          console.log('    Techno: duplicate content detected, stopping');
+          break;
+        }
 
         for (const item of items) {
           products.push({
