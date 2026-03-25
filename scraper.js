@@ -64,9 +64,9 @@ async function scrapeCData(page) {
 
   try {
     // Login
-    await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'networkidle2' });
-    await sleep(2000);
-    await page.waitForSelector('#Email', { timeout: 10000 });
+    await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'networkidle2', timeout: 30000 });
+    await sleep(3000);
+    await page.waitForSelector('#Email', { timeout: 20000 });
     await page.click('#Email');
     await page.type('#Email', process.env.SCRAPER_USER || '');
     await page.click('#Password');
@@ -183,6 +183,7 @@ async function scrapeMorelevi(page) {
     
     const afterUrl = page.url();
     console.log('    Morlevi URL after login:', afterUrl);
+    await sleep(2000);
 
     const categories = [
       { url: 'https://www.morlevi.co.il/Cat/195', type: 'נייד' },
