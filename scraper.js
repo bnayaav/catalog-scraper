@@ -499,13 +499,14 @@ async function scrapeCMS(page) {
         await page.goto(url, { waitUntil: 'networkidle2' });
 
         const items = await page.evaluate(() => {
-          return [...document.querySelectorAll('.type-product')].map(el => ({
-            title: el.querySelector('.woocommerce-loop-product__title')?.textContent?.trim() || '',
-            price: el.querySelector('.woocommerce-Price-amount')?.textContent?.trim() || '',
+          const cards = document.querySelectorAll('.type-product, .electron-loop-product, li.product');
+          return [...cards].map(el => ({
+            title: el.querySelector('.woocommerce-loop-product__title, h2, h3')?.textContent?.trim() || '',
+            price: el.querySelector('.woocommerce-Price-amount, .price')?.textContent?.trim() || '',
             img: el.querySelector('img')?.src || '',
             url: el.querySelector('a')?.href || '',
             inStock: !el.classList.contains('outofstock'),
-          }));
+          })).filter(p => p.title);
         });
 
         for (const item of items) {
