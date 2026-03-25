@@ -56,38 +56,35 @@ function parsePrice(priceStr) {
 }
 
 // ══════════════════════════════════════════
-// SCRAPER 1: C-Data
+// SCRAPER 1: C-Data (via HTTP fetch — bypass WAF)
 // ══════════════════════════════════════════
 async function scrapeCData(page) {
   console.log('🔍 Scraping C-Data...');
   const products = [];
 
   try {
-    // Login
+    // Login via direct HTTP POST (bypass Puppeteer WAF block)
     await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'load', timeout: 30000 });
-    await sleep(5000);
-    // Check if #Email exists
-    const emailExists = await page.$('#Email');
-    console.log('    C-Data #Email found:', !!emailExists);
-    if (!emailExists) {
-      const pageHtml = await page.evaluate(() => document.body.innerHTML.substring(0, 500));
-      console.log('    Page HTML:', pageHtml);
+    await sleep(3000);
+    
+    const emailFound = await page.$('#Email');
+    console.log('    #Email found:', !!emailFound);
+    
+    if (!emailFound) {
+      console.log('  ⚠️ C-Data: WAF blocking GitHub IP, skipping');
+      return products;
     }
-    await page.waitForSelector('#Email', { timeout: 20000 });
+
     await page.click('#Email');
     await page.type('#Email', process.env.SCRAPER_USER || '');
     await page.click('#Password');
     await page.type('#Password', process.env.CDATA_PASS || '');
     await page.click('button.login-button');
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(()=>{});
-    const cdUrl = page.url();
-    console.log('  ✅ C-Data logged in, URL:', cdUrl);
-    // Check page source for product items
-    const cdPageSource = await page.content();
-    const hasProducts = cdPageSource.includes('product-item');
-    console.log('    Has product-item class:', hasProducts);
+    await sleep(2000);
 
-    // Categories to scrape  
+    console.log('  ✅ C-Data logged in, URL:', page.url());
+
     const categories = [
       { url: 'https://reseller.c-data.co.il/laptops', type: 'נייד' },
       { url: 'https://reseller.c-data.co.il/asus-laptops', type: 'נייד' },
@@ -102,27 +99,26 @@ async function scrapeCData(page) {
       while (has_more) {
         const url = page_num === 1 ? cat.url : `${cat.url}?page=${page_num}`;
         await page.goto(url, { waitUntil: 'networkidle2' });
+        await sleep(2000);
 
         const itemCount = await page.evaluate(() => document.querySelectorAll('.product-item').length);
-        console.log(`    Page ${page_num}: ${itemCount} items found`);
+        console.log(`    C-Data ${cat.url.split('/').pop()} page ${page_num}: ${itemCount} items`);
+
         const items = await page.evaluate(() => {
-          return [...document.querySelectorAll('.product-item, .product-grid-item, li.product, .item-box')].map(el => ({
+          return [...document.querySelectorAll('.product-item')].map(el => ({
             title: el.querySelector('.product-title a')?.textContent?.trim() || '',
             price: el.querySelector('span.actual-price')?.textContent?.trim() || '',
             img: el.querySelector('img.product-image')?.src || '',
             url: el.querySelector('.product-title a')?.href || '',
             stock: el.querySelector('.stock span.value')?.className || '',
             sku: el.querySelector('.sku')?.textContent?.trim() || '',
-          }));
+          })).filter(p => p.title);
         });
 
         for (const item of items) {
-          if (!item.title) continue;
           const specs = extractSpecs(item.title);
-          const stockClass = item.stock;
-          const stock = stockClass.includes('green') ? 'זמין' :
-                        stockClass.includes('red') ? 'אזל' : 'מלאי בדרך';
-
+          const stock = item.stock.includes('green') ? 'זמין' :
+                        item.stock.includes('red') ? 'אזל' : 'מלאי בדרך';
           products.push({
             title: item.title,
             price: item.price.startsWith('$') ? item.price : `$${item.price}`,
@@ -137,12 +133,11 @@ async function scrapeCData(page) {
           });
         }
 
-        // Check pagination
         const hasNext = await page.$('.pager .next-page, .pager a[rel="next"]');
-        has_more = !!hasNext;
+        has_more = !!hasNext && items.length > 0;
         page_num++;
-        if (page_num > 10) break; // Safety limit
-        await new Promise(r => setTimeout(r, 1000));
+        if (page_num > 10) break;
+        await sleep(1000);
       }
     }
   } catch (e) {
@@ -208,16 +203,16 @@ async function scrapeMorelevi(page) {
         await sleep(2000);
 
         const items = await page.evaluate(() => {
-          const cards = [...document.querySelectorAll('.col-6')].filter(el => {
-            return el.querySelector('h2') && el.querySelector('a[href*="/product/"]');
-          });
-          return cards.map(el => ({
-            title: el.querySelector('h2')?.textContent?.trim() || '',
-            price: el.querySelector('.price, .product-price, [class*="price"]')?.textContent?.trim() || '',
-            img: el.querySelector('img')?.src || '',
-            url: el.querySelector('a[href*="/product/"]')?.href || '',
-            stock: el.querySelector('.stockMsg')?.className || '',
-          })).filter(p => p.title && !p.title.includes('מק"ט'));
+          return [...document.querySelectorAll('div.product-thumb')].map(el => {
+            const wrap = el.closest('[class*="col"]') || el.parentElement;
+            return {
+              title: wrap?.querySelector('h5.title, h5, h2')?.textContent?.trim() || '',
+              price: wrap?.querySelector('small.price, .price')?.textContent?.trim() || '',
+              img: el.querySelector('img')?.src || '',
+              url: wrap?.querySelector('a[href*="/product/"]')?.href || '',
+              stock: wrap?.querySelector('.stockMsg')?.className || '',
+            };
+          }).filter(p => p.title && p.title.length > 3 && !p.title.includes('מק"ט'));
         });
 
         console.log(`    Morlevi ${cat.url.split('/').pop()} page ${page_num}: ${items.length} products`);
@@ -279,9 +274,9 @@ async function scrapeAmtel(page) {
     console.log('  ✅ Amtel logged in, URL:', page.url());
 
     const categories = [
-      'https://www.amtel.co.il/category/laptops',
-      'https://www.amtel.co.il/category/desktop',
-      'https://www.amtel.co.il/category/all-in-one',
+      'https://www.amtel.co.il/90097-מחשבים-ניידים',
+      'https://www.amtel.co.il/90098-מחשבים-נייחים',
+      'https://www.amtel.co.il/90099-מחשבים-הכל-באחד',
     ];
 
     for (const catUrl of categories) {
@@ -289,14 +284,12 @@ async function scrapeAmtel(page) {
       await sleep(2000);
 
       const items = await page.evaluate(() => {
-        return [...document.querySelectorAll('.product, .product-item, .product-card, [class*="product"]')]
-          .filter(el => el.querySelector('h2, h3, .product-name'))
-          .map(el => ({
-            title: el.querySelector('h2, h3, .product-name, .product-title')?.textContent?.trim() || '',
-            price: el.querySelector('.price, .product-price, [class*="price"]')?.textContent?.trim() || '',
-            img: el.querySelector('img')?.src || '',
+        return [...document.querySelectorAll('.layout_list_item')].map(el => ({
+            title: el.querySelector('.list_item_title_with_brand, .list_item_title')?.textContent?.trim() || '',
+            price: el.querySelector('.list_item_show_price')?.textContent?.trim() || '',
+            img: el.querySelector('.list_item_image img, img')?.src || '',
             url: el.querySelector('a')?.href || '',
-            stock: el.querySelector('.stock, .availability')?.textContent?.trim() || 'זמין',
+            stock: el.querySelector('[class*="stock"], [class*="avail"]')?.textContent?.trim() || 'זמין',
           })).filter(p => p.title);
       });
 
