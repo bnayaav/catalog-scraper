@@ -75,7 +75,12 @@ async function scrapeCData(page) {
     }, process.env.SCRAPER_USER||'', process.env.CDATA_PASS||'');
     const cdBtn = await page.$('button[type="submit"]') || await page.$('input[type="submit"]');
     if (cdBtn) { await cdBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
-    console.log('  ✅ C-Data logged in');
+    const cdUrl = page.url();
+    console.log('  ✅ C-Data logged in, URL:', cdUrl);
+    // Check page source for product items
+    const cdPageSource = await page.content();
+    const hasProducts = cdPageSource.includes('product-item');
+    console.log('    Has product-item class:', hasProducts);
 
     // Categories to scrape  
     const categories = [
@@ -151,32 +156,42 @@ async function scrapeMorelevi(page) {
   const products = [];
 
   try {
-    // Login
+    // Step 1: Get login token via API
     await page.goto('https://www.morlevi.co.il/Login', { waitUntil: 'networkidle2' });
-    await sleep(2000);
-    await page.evaluate((user, pass) => {
-      document.querySelectorAll('input').forEach(i => {
-        const n = (i.name||i.id||i.placeholder||'').toLowerCase();
-        if (i.type==='email' || n.includes('email') || n.includes('mail')) i.value = user;
-        if (i.type==='password' || n.includes('pass')) i.value = pass;
-      });
-    }, process.env.SCRAPER_USER||'', process.env.MORLEVI_PASS||'');
-    await page.evaluate(() => {
-      const btn = document.querySelector('button[type="submit"]') || document.querySelector('.login-btn') || 
-                  [...document.querySelectorAll('button')].find(b => b.textContent.includes('כניסה') || b.textContent.toLowerCase().includes('login') || b.textContent.toLowerCase().includes('sign'));
-      if (btn) btn.click();
+    await sleep(3000);
+    
+    // Fill and submit using keyboard
+    await page.focus('input[type="email"]').catch(async () => {
+      const inputs = await page.$$('input');
+      for (const inp of inputs) {
+        const type = await inp.evaluate(el => el.type);
+        if (type === 'email' || type === 'text') { await inp.focus(); break; }
+      }
     });
-    await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{});
-    console.log('  ✅ Morlevi logged in');
+    await page.keyboard.type(process.env.SCRAPER_USER || '');
+    await page.keyboard.press('Tab');
+    await page.keyboard.type(process.env.MORLEVI_PASS || '');
+    await page.keyboard.press('Enter');
+    await page.waitForNavigation({waitUntil:'networkidle2', timeout:15000}).catch(()=>{});
+    await sleep(2000);
+
+    const afterUrl = page.url();
+    console.log('    Morlevi URL after login:', afterUrl);
+    
+    if (afterUrl.includes('Login')) {
+      // Try clicking submit button via coordinates
+      const btn = await page.$('button[type="submit"], .btn-login, button');
+      if (btn) {
+        await btn.evaluate(b => b.click());
+        await page.waitForNavigation({waitUntil:'networkidle2', timeout:10000}).catch(()=>{});
+      }
+    }
 
     const categories = [
       { url: 'https://www.morlevi.co.il/Cat/195', type: 'נייד' },
       { url: 'https://www.morlevi.co.il/Cat/4', type: 'נייח' },
       { url: 'https://www.morlevi.co.il/Cat/201', type: 'AIO' },
     ];
-    // Verify logged in
-    const mlCurrentUrl = page.url();
-    console.log('    Morlevi URL after login:', mlCurrentUrl);
 
     for (const cat of categories) {
       let page_num = 1;
@@ -185,26 +200,28 @@ async function scrapeMorelevi(page) {
       while (has_more) {
         const url = page_num === 1 ? cat.url : `${cat.url}?page=${page_num}`;
         await page.goto(url, { waitUntil: 'networkidle2' });
-        await sleep(1500);
+        await sleep(2000);
 
-        const mlCount = await page.evaluate(() => document.querySelectorAll('.col-6, .product-item, .b3').length);
-        console.log(`    Morlevi page ${page_num}: ${mlCount} elements`);
         const items = await page.evaluate(() => {
-          return [...document.querySelectorAll('.col-6.col-lg-3, .col-6.col-md-4, .col-6')].filter(el => el.querySelector('h2')).map(el => ({
+          const cards = [...document.querySelectorAll('.col-6')].filter(el => {
+            return el.querySelector('h2') && el.querySelector('a[href*="/product/"]');
+          });
+          return cards.map(el => ({
             title: el.querySelector('h2')?.textContent?.trim() || '',
-            price: el.querySelector('.price, .product-price')?.textContent?.trim() || '',
-            img: el.querySelector('img.img-fluid')?.src || '',
-            url: el.querySelector('a')?.href || '',
+            price: el.querySelector('.price, .product-price, [class*="price"]')?.textContent?.trim() || '',
+            img: el.querySelector('img')?.src || '',
+            url: el.querySelector('a[href*="/product/"]')?.href || '',
             stock: el.querySelector('.stockMsg')?.className || '',
-          }));
+          })).filter(p => p.title && !p.title.includes('מק"ט'));
         });
 
+        console.log(`    Morlevi ${cat.url.split('/').pop()} page ${page_num}: ${items.length} products`);
+
         for (const item of items) {
-          if (!item.title || item.title.includes('מק"ט')) continue;
+          if (!item.title) continue;
           const specs = extractSpecs(item.title);
           const stock = item.stock.includes('green') ? 'זמין' :
                        item.stock.includes('red') ? 'אזל' : '';
-
           products.push({
             title: item.title,
             price: item.price || '',
@@ -219,11 +236,11 @@ async function scrapeMorelevi(page) {
           });
         }
 
-        const hasNext = await page.$('nav a[aria-label="Next"]');
-        has_more = !!hasNext;
+        const hasNext = await page.$('nav a[aria-label="Next"], .next-page, a[rel="next"]');
+        has_more = !!hasNext && items.length > 0;
         page_num++;
         if (page_num > 10) break;
-        await new Promise(r => setTimeout(r, 1000));
+        await sleep(1500);
       }
     }
   } catch (e) {
