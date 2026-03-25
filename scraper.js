@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════
 
 const puppeteer = require('puppeteer');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ── הגדרות ──
 const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
@@ -159,7 +160,7 @@ async function scrapeMorelevi(page) {
       while (has_more) {
         const url = page_num === 1 ? cat.url : `${cat.url}?page=${page_num}`;
         await page.goto(url, { waitUntil: 'networkidle2' });
-        await page.waitForTimeout(1500);
+        await sleep(1500);
 
         const items = await page.evaluate(() => {
           return [...document.querySelectorAll('.col-6.col-lg-3, .col-6.col-md-4')].map(el => ({
@@ -237,7 +238,7 @@ async function scrapeAmtel(page) {
 
     for (const catUrl of catUrls) {
       await page.goto(catUrl, { waitUntil: 'networkidle2' });
-      await page.waitForTimeout(2000);
+      await sleep(2000);
 
       const items = await page.evaluate(() => {
         return [...document.querySelectorAll('.product, .product-item, .product-card')].map(el => ({
@@ -397,7 +398,7 @@ async function scrapeAtomic(page) {
 
   try {
     await page.goto('https://atomiconline.co.il/login', { waitUntil: 'networkidle2' });
-    await page.waitForTimeout(2000);
+    await sleep(2000);
     
     const emailInput = await page.$('input[type="email"], input[name="email"], input[placeholder*="mail"]');
     if (emailInput) await emailInput.type(process.env.SCRAPER_USER);
@@ -415,7 +416,7 @@ async function scrapeAtomic(page) {
 
     for (const cat of categories) {
       await page.goto(cat.url, { waitUntil: 'networkidle2' });
-      await page.waitForTimeout(3000);
+      await sleep(3000);
 
       // Load more products
       let loadMore = true;
@@ -423,7 +424,7 @@ async function scrapeAtomic(page) {
         const btn = await page.$('button:contains("טען עוד"), button:contains("Load more")');
         if (!btn) break;
         await btn.click();
-        await page.waitForTimeout(2000);
+        await sleep(2000);
         const stillHas = await page.$('button:contains("טען עוד"), button:contains("Load more")');
         loadMore = !!stillHas;
       }
@@ -472,10 +473,15 @@ async function scrapeCMS(page) {
 
   try {
     await page.goto('https://cms.co.il/wp-login.php', { waitUntil: 'networkidle2' });
-    await page.type('#user_login', process.env.SCRAPER_USER);
-    await page.type('#user_pass', process.env.CMS_PASS || '');
-    await page.click('#wp-submit');
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+    await sleep(2000);
+    await page.evaluate((user, pass) => {
+      const u = document.querySelector('#user_login') || document.querySelector('input[name="log"]');
+      const p = document.querySelector('#user_pass') || document.querySelector('input[name="pwd"]');
+      if (u) u.value = user;
+      if (p) p.value = pass;
+    }, process.env.SCRAPER_USER || '', process.env.CMS_PASS || '');
+    const cBtn = await page.$('#wp-submit') || await page.$('input[type="submit"]');
+    if (cBtn) { await cBtn.click(); await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(()=>{}); }
     console.log('  ✅ CMS logged in');
 
     const categories = [
