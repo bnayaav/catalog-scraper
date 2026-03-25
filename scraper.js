@@ -62,7 +62,7 @@ async function scrapeCData(page) {
   try {
     // Login
     await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'networkidle2' });
-    await page.type('#Email', 'hanania2004@gmail.com');
+    await page.type('#Email', process.env.SCRAPER_USER);
     await page.type('#Password', process.env.CDATA_PASS || '200480903');
     await page.click('button[type="submit"], input[type="submit"]');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
@@ -140,7 +140,7 @@ async function scrapeMorelevi(page) {
   try {
     // Login
     await page.goto('https://www.morlevi.co.il/Login', { waitUntil: 'networkidle2' });
-    await page.type('input[type="email"], input[name="email"]', 'hanania2004@gmail.com');
+    await page.type('input[type="email"], input[name="email"]', process.env.CDATA_USER || process.env.SCRAPER_USER);
     await page.type('input[type="password"]', process.env.MORLEVI_PASS || '20042004');
     await page.click('button[type="submit"], .login-btn');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
@@ -223,7 +223,7 @@ async function scrapeAmtel(page) {
       await page.waitForNavigation({ waitUntil: 'networkidle2' });
     }
 
-    await page.type('input[type="email"], input[name="email"]', 'hanania2004@gmail.com');
+    await page.type('input[type="email"], input[name="email"]', process.env.CDATA_USER || process.env.SCRAPER_USER);
     await page.type('input[type="password"]', process.env.AMTEL_PASS || '2a525e');
     await page.click('button[type="submit"]');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
@@ -283,7 +283,7 @@ async function scrapeTechnoRezef(page) {
 
   try {
     await page.goto('https://techno-rezef.com/wp-login.php', { waitUntil: 'networkidle2' });
-    await page.type('#user_login', 'hanania2004@gmail.com');
+    await page.type('#user_login', process.env.CDATA_USER || process.env.SCRAPER_USER);
     await page.type('#user_pass', process.env.TECHNO_PASS || '200480903');
     await page.click('#wp-submit');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
@@ -387,6 +387,153 @@ async function saveToKV(products) {
   console.log('📊 Stats:', meta.bySupplier);
 }
 
+
+// ══════════════════════════════════════════
+// SCRAPER 5: Atomic Online
+// ══════════════════════════════════════════
+async function scrapeAtomic(page) {
+  console.log('🔍 Scraping Atomic...');
+  const products = [];
+
+  try {
+    await page.goto('https://atomiconline.co.il/login', { waitUntil: 'networkidle2' });
+    await page.waitForTimeout(2000);
+    
+    const emailInput = await page.$('input[type="email"], input[name="email"], input[placeholder*="mail"]');
+    if (emailInput) await emailInput.type(process.env.SCRAPER_USER);
+    const passInput = await page.$('input[type="password"]');
+    if (passInput) await passInput.type(process.env.ATOMIC_PASS || '');
+    
+    const submitBtn = await page.$('button[type="submit"]');
+    if (submitBtn) { await submitBtn.click(); await page.waitForNavigation({ waitUntil: 'networkidle2' }); }
+    console.log('  ✅ Atomic logged in');
+
+    const categories = [
+      { url: 'https://atomiconline.co.il/categories/laptops', type: 'נייד' },
+      { url: 'https://atomiconline.co.il/categories/desktops', type: 'נייח' },
+    ];
+
+    for (const cat of categories) {
+      await page.goto(cat.url, { waitUntil: 'networkidle2' });
+      await page.waitForTimeout(3000);
+
+      // Load more products
+      let loadMore = true;
+      while (loadMore) {
+        const btn = await page.$('button:contains("טען עוד"), button:contains("Load more")');
+        if (!btn) break;
+        await btn.click();
+        await page.waitForTimeout(2000);
+        const stillHas = await page.$('button:contains("טען עוד"), button:contains("Load more")');
+        loadMore = !!stillHas;
+      }
+
+      const items = await page.evaluate(() => {
+        return [...document.querySelectorAll('a[href*="/products/"]')].map(el => ({
+          title: el.querySelector('p.line-clamp-3, p.font-medium')?.textContent?.trim() || '',
+          price: el.querySelector('span.text-\[14px\]')?.textContent?.trim() || '',
+          img: el.querySelector('img')?.src || '',
+          url: el.href || '',
+          stock: el.querySelector('.badge-clearance') ? 'חיסול' : 'זמין',
+        }));
+      });
+
+      for (const item of items) {
+        if (!item.title) continue;
+        const specs = extractSpecs(item.title);
+        products.push({
+          title: item.title,
+          price: item.price,
+          priceNum: parsePrice(item.price),
+          img: item.img,
+          url: item.url,
+          type: cat.type,
+          supplier: 'Atomic',
+          brand: detectBrand(item.title),
+          stock: item.stock,
+          ...specs,
+        });
+      }
+    }
+  } catch (e) {
+    console.error('  ❌ Atomic error:', e.message);
+  }
+
+  console.log(`  ✅ Atomic: ${products.length} products`);
+  return products;
+}
+
+// ══════════════════════════════════════════
+// SCRAPER 6: CMS
+// ══════════════════════════════════════════
+async function scrapeCMS(page) {
+  console.log('🔍 Scraping CMS...');
+  const products = [];
+
+  try {
+    await page.goto('https://cms.co.il/wp-login.php', { waitUntil: 'networkidle2' });
+    await page.type('#user_login', process.env.SCRAPER_USER);
+    await page.type('#user_pass', process.env.CMS_PASS || '');
+    await page.click('#wp-submit');
+    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+    console.log('  ✅ CMS logged in');
+
+    const categories = [
+      { url: 'https://cms.co.il/product-category/laptop-pc/', type: 'נייד' },
+      { url: 'https://cms.co.il/product-category/desktop-pc/', type: 'נייח' },
+      { url: 'https://cms.co.il/product-category/all-in-one/', type: 'AIO' },
+    ];
+
+    for (const cat of categories) {
+      let pageNum = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const url = pageNum === 1 ? cat.url : `${cat.url}page/${pageNum}/`;
+        await page.goto(url, { waitUntil: 'networkidle2' });
+
+        const items = await page.evaluate(() => {
+          return [...document.querySelectorAll('.type-product')].map(el => ({
+            title: el.querySelector('.woocommerce-loop-product__title')?.textContent?.trim() || '',
+            price: el.querySelector('.woocommerce-Price-amount')?.textContent?.trim() || '',
+            img: el.querySelector('img')?.src || '',
+            url: el.querySelector('a')?.href || '',
+            inStock: !el.classList.contains('outofstock'),
+          }));
+        });
+
+        for (const item of items) {
+          if (!item.title) continue;
+          const specs = extractSpecs(item.title);
+          products.push({
+            title: item.title,
+            price: item.price,
+            priceNum: parsePrice(item.price),
+            img: item.img,
+            url: item.url,
+            type: cat.type,
+            supplier: 'CMS',
+            brand: detectBrand(item.title),
+            stock: item.inStock ? 'זמין' : 'אזל',
+            ...specs,
+          });
+        }
+
+        const hasNext = await page.$('.next.page-numbers');
+        hasMore = !!hasNext;
+        pageNum++;
+        if (pageNum > 35) break;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  } catch (e) {
+    console.error('  ❌ CMS error:', e.message);
+  }
+
+  console.log(`  ✅ CMS: ${products.length} products`);
+  return products;
+}
+
 // ══════════════════════════════════════════
 // MAIN
 // ══════════════════════════════════════════
@@ -417,6 +564,12 @@ async function main() {
 
     const techno = await scrapeTechnoRezef(page);
     allProducts.push(...techno);
+
+    const atomic = await scrapeAtomic(page);
+    allProducts.push(...atomic);
+
+    const cms = await scrapeCMS(page);
+    allProducts.push(...cms);
 
   } finally {
     await browser.close();
