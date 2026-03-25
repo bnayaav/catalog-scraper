@@ -66,15 +66,13 @@ async function scrapeCData(page) {
     // Login
     await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'networkidle2' });
     await sleep(2000);
-    await page.evaluate((user, pass) => {
-      document.querySelectorAll('input').forEach(i => {
-        const n = (i.name||i.id||'').toLowerCase();
-        if (i.type==='email' || n.includes('email') || n.includes('user')) i.value = user;
-        if (i.type==='password' || n.includes('pass')) i.value = pass;
-      });
-    }, process.env.SCRAPER_USER||'', process.env.CDATA_PASS||'');
-    const cdBtn = await page.$('button[type="submit"]') || await page.$('input[type="submit"]');
-    if (cdBtn) { await cdBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
+    await page.waitForSelector('#Email', { timeout: 10000 });
+    await page.click('#Email');
+    await page.type('#Email', process.env.SCRAPER_USER || '');
+    await page.click('#Password');
+    await page.type('#Password', process.env.CDATA_PASS || '');
+    await page.click('button.login-button');
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(()=>{});
     const cdUrl = page.url();
     console.log('  ✅ C-Data logged in, URL:', cdUrl);
     // Check page source for product items
@@ -157,35 +155,34 @@ async function scrapeMorelevi(page) {
 
   try {
     // Step 1: Get login token via API
-    await page.goto('https://www.morlevi.co.il/Login', { waitUntil: 'networkidle2' });
+    // Morlevi - login via modal popup
+    await page.goto('https://www.morlevi.co.il', { waitUntil: 'networkidle2' });
+    await sleep(2000);
+    
+    // Click login button to open modal
+    const loginBtn = await page.$('a[href*="login"], button[data-target*="login"], .login-btn, a.nav-link[href*="login"]');
+    if (loginBtn) {
+      await loginBtn.click();
+      await sleep(1500);
+    } else {
+      // Try finding by text
+      await page.evaluate(() => {
+        const links = [...document.querySelectorAll('a, button')];
+        const btn = links.find(l => l.textContent.trim().includes('התחבר') || l.textContent.toLowerCase().includes('login'));
+        if (btn) btn.click();
+      });
+      await sleep(1500);
+    }
+    
+    // Fill modal form
+    await page.waitForSelector('#email', { timeout: 5000 }).catch(()=>{});
+    await page.type('#email', process.env.SCRAPER_USER || '');
+    await page.type('#Password', process.env.MORLEVI_PASS || '');
+    await page.click('button[type="submit"].btn-primary');
     await sleep(3000);
     
-    // Fill and submit using keyboard
-    await page.focus('input[type="email"]').catch(async () => {
-      const inputs = await page.$$('input');
-      for (const inp of inputs) {
-        const type = await inp.evaluate(el => el.type);
-        if (type === 'email' || type === 'text') { await inp.focus(); break; }
-      }
-    });
-    await page.keyboard.type(process.env.SCRAPER_USER || '');
-    await page.keyboard.press('Tab');
-    await page.keyboard.type(process.env.MORLEVI_PASS || '');
-    await page.keyboard.press('Enter');
-    await page.waitForNavigation({waitUntil:'networkidle2', timeout:15000}).catch(()=>{});
-    await sleep(2000);
-
     const afterUrl = page.url();
     console.log('    Morlevi URL after login:', afterUrl);
-    
-    if (afterUrl.includes('Login')) {
-      // Try clicking submit button via coordinates
-      const btn = await page.$('button[type="submit"], .btn-login, button');
-      if (btn) {
-        await btn.evaluate(b => b.click());
-        await page.waitForNavigation({waitUntil:'networkidle2', timeout:10000}).catch(()=>{});
-      }
-    }
 
     const categories = [
       { url: 'https://www.morlevi.co.il/Cat/195', type: 'נייד' },
