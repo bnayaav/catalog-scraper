@@ -89,8 +89,10 @@ async function scrapeCData(page) {
         const url = page_num === 1 ? cat.url : `${cat.url}?page=${page_num}`;
         await page.goto(url, { waitUntil: 'networkidle2' });
 
+        const itemCount = await page.evaluate(() => document.querySelectorAll('.product-item').length);
+        console.log(`    Page ${page_num}: ${itemCount} items found`);
         const items = await page.evaluate(() => {
-          return [...document.querySelectorAll('.product-item')].map(el => ({
+          return [...document.querySelectorAll('.product-item, .item, .product')].map(el => ({
             title: el.querySelector('.product-title a')?.textContent?.trim() || '',
             price: el.querySelector('span.actual-price')?.textContent?.trim() || '',
             img: el.querySelector('img.product-image')?.src || '',
@@ -155,8 +157,12 @@ async function scrapeMorelevi(page) {
         if (i.type==='password' || n.includes('pass')) i.value = pass;
       });
     }, process.env.SCRAPER_USER||'', process.env.MORLEVI_PASS||'');
-    const mlBtn = await page.$('button[type="submit"]') || await page.$('.login-btn');
-    if (mlBtn) { await mlBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[type="submit"]') || document.querySelector('.login-btn') || 
+                  [...document.querySelectorAll('button')].find(b => b.textContent.includes('כניסה') || b.textContent.toLowerCase().includes('login') || b.textContent.toLowerCase().includes('sign'));
+      if (btn) btn.click();
+    });
+    await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{});
     console.log('  ✅ Morlevi logged in');
 
     const categories = [
@@ -305,6 +311,8 @@ async function scrapeTechnoRezef(page) {
     const tBtn = await page.$('#wp-submit') || await page.$('input[type="submit"]');
     if(tBtn) { await tBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
     console.log('  ✅ Techno Rezef logged in');
+    const pageTitle_techno = await page.title();
+    console.log('    Page title: ' + pageTitle_techno);
 
     const categories = [
       'https://techno-rezef.com/product-category/laptops/',
@@ -448,7 +456,7 @@ async function scrapeAtomic(page) {
       const items = await page.evaluate(() => {
         return [...document.querySelectorAll('a[href*="/products/"]')].map(el => ({
           title: el.querySelector('p.line-clamp-3, p.font-medium')?.textContent?.trim() || '',
-          price: el.querySelector('span.text-\[14px\]')?.textContent?.trim() || '',
+          price: (() => { for(const s of el.querySelectorAll('span')) { if(s.textContent.includes('₪')||s.textContent.includes('$')) return s.textContent.trim(); } return ''; })(),
           img: el.querySelector('img')?.src || '',
           url: el.href || '',
           stock: el.querySelector('.badge-clearance') ? 'חיסול' : 'זמין',
@@ -499,6 +507,8 @@ async function scrapeCMS(page) {
     const cBtn = await page.$('#wp-submit') || await page.$('input[type="submit"]');
     if (cBtn) { await cBtn.click(); await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(()=>{}); }
     console.log('  ✅ CMS logged in');
+    const pageTitle_cms = await page.title();
+    console.log('    Page title: ' + pageTitle_cms);
 
     const categories = [
       { url: 'https://cms.co.il/product-category/laptop-pc/', type: 'נייד' },
