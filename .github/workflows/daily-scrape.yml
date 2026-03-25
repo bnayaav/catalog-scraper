@@ -11,16 +11,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
+
       - name: Install dependencies
         run: npm install
-        working-directory: ./scraper
+
       - name: Install Puppeteer browsers
         run: npx puppeteer browsers install chrome
-        working-directory: ./scraper
+
       - name: Run scraper
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -40,7 +42,7 @@ jobs:
           CMS_USER: ${{ secrets.CMS_USER }}
           CMS_PASS: ${{ secrets.CMS_PASS }}
         run: node scraper.js
-        working-directory: ./scraper
+
       - name: Notify on failure
         if: failure()
         run: echo "Scraper failed"
