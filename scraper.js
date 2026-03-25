@@ -257,44 +257,44 @@ async function scrapeAmtel(page) {
   const products = [];
 
   try {
-    await page.goto('https://www.amtel.co.il/', { waitUntil: 'networkidle2' });
+    await page.goto('https://www.amtel.co.il/customer_login', { waitUntil: 'networkidle2' });
+    await sleep(2000);
+    await page.waitForSelector('#customer_session_username', { timeout: 10000 });
+    await page.type('#customer_session_username', process.env.SCRAPER_USER || '');
+    await page.type('#customer_session_password', process.env.AMTEL_PASS || '');
+    // Submit via form (link submits to /customer_sessions)
+    await page.evaluate(() => {
+      const form = document.querySelector('form[action*="customer_session"]');
+      if (form) form.submit();
+    });
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(()=>{});
+    await sleep(2000);
+    console.log('  ✅ Amtel logged in, URL:', page.url());
 
-    // Find login
-    const loginLink = await page.$('a[href*="login"], a[href*="account"]');
-    if (loginLink) {
-      await loginLink.click();
-      await page.waitForNavigation({ waitUntil: 'networkidle2' });
-    }
-
-    await page.type('input[type="email"], input[name="email"]', process.env.CDATA_USER || process.env.SCRAPER_USER);
-    await page.type('input[type="password"]', process.env.AMTEL_PASS || '2a525e');
-    await page.click('button[type="submit"]');
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
-    console.log('  ✅ Amtel logged in');
-
-    // Scrape laptops category
-    const catUrls = [
+    const categories = [
       'https://www.amtel.co.il/category/laptops',
-      'https://www.amtel.co.il/category/computers',
+      'https://www.amtel.co.il/category/desktop',
+      'https://www.amtel.co.il/category/all-in-one',
     ];
 
-    for (const catUrl of catUrls) {
+    for (const catUrl of categories) {
       await page.goto(catUrl, { waitUntil: 'networkidle2' });
       await sleep(2000);
 
       const items = await page.evaluate(() => {
-        return [...document.querySelectorAll('.product, .product-item, .product-card')].map(el => ({
-          title: el.querySelector('h2, h3, .product-name, .product-title')?.textContent?.trim() || '',
-          price: el.querySelector('.price, .product-price')?.textContent?.trim() || '',
-          img: el.querySelector('img')?.src || '',
-          url: el.querySelector('a')?.href || '',
-          stock: el.querySelector('.stock, .availability')?.textContent?.trim() || '',
-        }));
+        return [...document.querySelectorAll('.product, .product-item, .product-card, [class*="product"]')]
+          .filter(el => el.querySelector('h2, h3, .product-name'))
+          .map(el => ({
+            title: el.querySelector('h2, h3, .product-name, .product-title')?.textContent?.trim() || '',
+            price: el.querySelector('.price, .product-price, [class*="price"]')?.textContent?.trim() || '',
+            img: el.querySelector('img')?.src || '',
+            url: el.querySelector('a')?.href || '',
+            stock: el.querySelector('.stock, .availability')?.textContent?.trim() || 'זמין',
+          })).filter(p => p.title);
       });
 
       for (const item of items) {
         if (!item.title) continue;
-        const specs = extractSpecs(item.title);
         products.push({
           title: item.title,
           price: item.price,
@@ -305,9 +305,10 @@ async function scrapeAmtel(page) {
           supplier: 'Amtel',
           brand: detectBrand(item.title),
           stock: item.stock.includes('אזל') ? 'אזל' : 'זמין',
-          ...specs,
+          ...extractSpecs(item.title),
         });
       }
+      console.log(`    Amtel ${catUrl.split('/').pop()}: ${items.length} products`);
     }
   } catch (e) {
     console.error('  ❌ Amtel error:', e.message);
@@ -318,71 +319,71 @@ async function scrapeAmtel(page) {
 }
 
 // ══════════════════════════════════════════
-// SCRAPER 4: Techno Rezef
+// SCRAPER 4: Techno Rezef (Shopify)
 // ══════════════════════════════════════════
 async function scrapeTechnoRezef(page) {
   console.log('🔍 Scraping Techno Rezef...');
   const products = [];
 
   try {
-    await page.goto('https://techno-rezef.com/wp-login.php', { waitUntil: 'networkidle2' });
+    await page.goto('https://techno-rezef.com/account/login', { waitUntil: 'networkidle2' });
     await sleep(2000);
-    await page.evaluate((user, pass) => {
-      const u = document.querySelector('#user_login') || document.querySelector('input[name="log"]');
-      const p = document.querySelector('#user_pass') || document.querySelector('input[name="pwd"]');
-      if(u) u.value=user; if(p) p.value=pass;
-    }, process.env.SCRAPER_USER||'', process.env.TECHNO_PASS||'');
-    const tBtn = await page.$('#wp-submit') || await page.$('input[type="submit"]');
-    if(tBtn) { await tBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
-    console.log('  ✅ Techno Rezef logged in');
-    const pageTitle_techno = await page.title();
-    console.log('    Page title: ' + pageTitle_techno);
+    await page.waitForSelector('#customer-email', { timeout: 10000 });
+    await page.type('#customer-email', process.env.SCRAPER_USER || '');
+    await page.type('#customer-password', process.env.TECHNO_PASS || '');
+    await page.click('button.btn--primary');
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(()=>{});
+    await sleep(2000);
+    console.log('  ✅ Techno logged in, URL:', page.url());
 
     const categories = [
-      'https://techno-rezef.com/product-category/laptops/',
-      'https://techno-rezef.com/product-category/desktops/',
+      { url: 'https://techno-rezef.com/collections/laptops', type: 'נייד' },
+      { url: 'https://techno-rezef.com/collections/desktops', type: 'נייח' },
+      { url: 'https://techno-rezef.com/collections/all', type: null },
     ];
 
-    for (const catUrl of categories) {
+    for (const cat of categories) {
       let pageNum = 1;
       let hasMore = true;
 
       while (hasMore) {
-        const url = pageNum === 1 ? catUrl : `${catUrl}page/${pageNum}/`;
+        const url = `${cat.url}?page=${pageNum}`;
         await page.goto(url, { waitUntil: 'networkidle2' });
+        await sleep(2000);
 
         const items = await page.evaluate(() => {
-          return [...document.querySelectorAll('.type-product, .product')].map(el => ({
-            title: el.querySelector('h2, .woocommerce-loop-product__title')?.textContent?.trim() || '',
-            price: el.querySelector('.price .amount, .woocommerce-Price-amount')?.textContent?.trim() || '',
-            img: el.querySelector('img')?.src || '',
-            url: el.querySelector('a')?.href || '',
-            inStock: !el.classList.contains('outofstock'),
-          }));
+          return [...document.querySelectorAll('.product-item, .grid__item, .card-wrapper, [class*="product"]')]
+            .filter(el => el.querySelector('h2, h3, .card__heading'))
+            .map(el => ({
+              title: el.querySelector('h2, h3, .card__heading, .product-item__title')?.textContent?.trim() || '',
+              price: el.querySelector('.price, .price__regular, [class*="price"]')?.textContent?.trim() || '',
+              img: el.querySelector('img')?.src || '',
+              url: (() => { const a = el.querySelector('a'); return a ? 'https://techno-rezef.com' + a.getAttribute('href') : ''; })(),
+              inStock: !el.querySelector('[class*="sold-out"], [class*="unavailable"]'),
+            })).filter(p => p.title);
         });
 
+        console.log(`    Techno page ${pageNum}: ${items.length} products`);
+        if (items.length === 0) break;
+
         for (const item of items) {
-          if (!item.title) continue;
-          const specs = extractSpecs(item.title);
           products.push({
             title: item.title,
             price: item.price,
             priceNum: parsePrice(item.price),
             img: item.img,
             url: item.url,
-            type: detectType(item.title),
+            type: cat.type || detectType(item.title),
             supplier: 'Techno-Rezef',
             brand: detectBrand(item.title),
             stock: item.inStock ? 'זמין' : 'אזל',
-            ...specs,
+            ...extractSpecs(item.title),
           });
         }
 
-        const hasNext = await page.$('.woocommerce-pagination .next, .next.page-numbers');
-        hasMore = !!hasNext;
         pageNum++;
-        if (pageNum > 35) break;
-        await new Promise(r => setTimeout(r, 1000));
+        if (pageNum > 20) break;
+        await sleep(1000);
       }
     }
   } catch (e) {
@@ -392,50 +393,6 @@ async function scrapeTechnoRezef(page) {
   console.log(`  ✅ Techno Rezef: ${products.length} products`);
   return products;
 }
-
-// ══════════════════════════════════════════
-// שמירה ב-Cloudflare KV
-// ══════════════════════════════════════════
-async function saveToKV(products) {
-  console.log(`\n💾 Saving ${products.length} products to Cloudflare KV...`);
-
-  const url = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE}/values/catalog`;
-
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(products),
-  });
-
-  if (res.ok) {
-    console.log('✅ Saved to KV successfully');
-  } else {
-    const err = await res.text();
-    throw new Error(`KV save failed: ${err}`);
-  }
-
-  // Also save metadata
-  const meta = {
-    lastUpdate: new Date().toISOString(),
-    count: products.length,
-    bySupplier: products.reduce((acc, p) => {
-      acc[p.supplier] = (acc[p.supplier] || 0) + 1;
-      return acc;
-    }, {}),
-  };
-
-  await fetch(url.replace('/catalog', '/catalog_meta'), {
-    method: 'PUT',
-    headers: { 'Authorization': `Bearer ${CF_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(meta),
-  });
-
-  console.log('📊 Stats:', meta.bySupplier);
-}
-
 
 // ══════════════════════════════════════════
 // SCRAPER 5: Atomic Online
@@ -517,83 +474,11 @@ async function scrapeAtomic(page) {
 // ══════════════════════════════════════════
 async function scrapeCMS(page) {
   console.log('🔍 Scraping CMS...');
-  const products = [];
-
-  try {
-    await page.goto('https://cms.co.il/wp-login.php', { waitUntil: 'networkidle2' });
-    await sleep(2000);
-    await page.evaluate((user, pass) => {
-      const u = document.querySelector('#user_login') || document.querySelector('input[name="log"]');
-      const p = document.querySelector('#user_pass') || document.querySelector('input[name="pwd"]');
-      if (u) u.value = user;
-      if (p) p.value = pass;
-    }, process.env.SCRAPER_USER || '', process.env.CMS_PASS || '');
-    const cBtn = await page.$('#wp-submit') || await page.$('input[type="submit"]');
-    if (cBtn) { await cBtn.click(); await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(()=>{}); }
-    console.log('  ✅ CMS logged in');
-    const pageTitle_cms = await page.title();
-    console.log('    Page title: ' + pageTitle_cms);
-
-    const categories = [
-      { url: 'https://cms.co.il/product-category/laptop-pc/', type: 'נייד' },
-      { url: 'https://cms.co.il/product-category/desktop-pc/', type: 'נייח' },
-      { url: 'https://cms.co.il/product-category/all-in-one/', type: 'AIO' },
-    ];
-
-    for (const cat of categories) {
-      let pageNum = 1;
-      let hasMore = true;
-
-      while (hasMore) {
-        const url = pageNum === 1 ? cat.url : `${cat.url}page/${pageNum}/`;
-        await page.goto(url, { waitUntil: 'networkidle2' });
-
-        const items = await page.evaluate(() => {
-          const cards = document.querySelectorAll('.type-product, .electron-loop-product, li.product');
-          return [...cards].map(el => ({
-            title: el.querySelector('.woocommerce-loop-product__title, h2, h3')?.textContent?.trim() || '',
-            price: el.querySelector('.woocommerce-Price-amount, .price')?.textContent?.trim() || '',
-            img: el.querySelector('img')?.src || '',
-            url: el.querySelector('a')?.href || '',
-            inStock: !el.classList.contains('outofstock'),
-          })).filter(p => p.title);
-        });
-
-        for (const item of items) {
-          if (!item.title) continue;
-          const specs = extractSpecs(item.title);
-          products.push({
-            title: item.title,
-            price: item.price,
-            priceNum: parsePrice(item.price),
-            img: item.img,
-            url: item.url,
-            type: cat.type,
-            supplier: 'CMS',
-            brand: detectBrand(item.title),
-            stock: item.inStock ? 'זמין' : 'אזל',
-            ...specs,
-          });
-        }
-
-        const hasNext = await page.$('.next.page-numbers');
-        hasMore = !!hasNext;
-        pageNum++;
-        if (pageNum > 35) break;
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    }
-  } catch (e) {
-    console.error('  ❌ CMS error:', e.message);
-  }
-
-  console.log(`  ✅ CMS: ${products.length} products`);
-  return products;
+  console.log('  ⚠️ CMS: Protected by CAPTCHA — skipping');
+  return [];
 }
 
-// ══════════════════════════════════════════
-// MAIN
-// ══════════════════════════════════════════
+
 async function main() {
   console.log('🚀 Starting catalog scrape:', new Date().toLocaleString('he-IL'));
 
