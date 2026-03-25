@@ -3,7 +3,9 @@
 // מסרוק 4 אתרי ספקים ומעדכן Cloudflare KV
 // ═══════════════════════════════════════════════════════════
 
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ── הגדרות ──
@@ -75,10 +77,12 @@ async function scrapeCData(page) {
     if (cdBtn) { await cdBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
     console.log('  ✅ C-Data logged in');
 
-    // Categories to scrape
+    // Categories to scrape  
     const categories = [
       { url: 'https://reseller.c-data.co.il/laptops', type: 'נייד' },
-      { url: 'https://reseller.c-data.co.il/computerization', type: null },
+      { url: 'https://reseller.c-data.co.il/asus-laptops', type: 'נייד' },
+      { url: 'https://reseller.c-data.co.il/hp-laptops', type: 'נייד' },
+      { url: 'https://reseller.c-data.co.il/dell-laptops', type: 'נייד' },
     ];
 
     for (const cat of categories) {
@@ -92,7 +96,7 @@ async function scrapeCData(page) {
         const itemCount = await page.evaluate(() => document.querySelectorAll('.product-item').length);
         console.log(`    Page ${page_num}: ${itemCount} items found`);
         const items = await page.evaluate(() => {
-          return [...document.querySelectorAll('.product-item, .item, .product')].map(el => ({
+          return [...document.querySelectorAll('.product-item, .product-grid-item, li.product, .item-box')].map(el => ({
             title: el.querySelector('.product-title a')?.textContent?.trim() || '',
             price: el.querySelector('span.actual-price')?.textContent?.trim() || '',
             img: el.querySelector('img.product-image')?.src || '',
@@ -170,6 +174,9 @@ async function scrapeMorelevi(page) {
       { url: 'https://www.morlevi.co.il/Cat/4', type: 'נייח' },
       { url: 'https://www.morlevi.co.il/Cat/201', type: 'AIO' },
     ];
+    // Verify logged in
+    const mlCurrentUrl = page.url();
+    console.log('    Morlevi URL after login:', mlCurrentUrl);
 
     for (const cat of categories) {
       let page_num = 1;
@@ -180,8 +187,10 @@ async function scrapeMorelevi(page) {
         await page.goto(url, { waitUntil: 'networkidle2' });
         await sleep(1500);
 
+        const mlCount = await page.evaluate(() => document.querySelectorAll('.col-6, .product-item, .b3').length);
+        console.log(`    Morlevi page ${page_num}: ${mlCount} elements`);
         const items = await page.evaluate(() => {
-          return [...document.querySelectorAll('.col-6.col-lg-3, .col-6.col-md-4')].map(el => ({
+          return [...document.querySelectorAll('.col-6.col-lg-3, .col-6.col-md-4, .col-6')].filter(el => el.querySelector('h2')).map(el => ({
             title: el.querySelector('h2')?.textContent?.trim() || '',
             price: el.querySelector('.price, .product-price')?.textContent?.trim() || '',
             img: el.querySelector('img.img-fluid')?.src || '',
