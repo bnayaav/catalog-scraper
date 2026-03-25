@@ -1,0 +1,12 @@
+{
+  "name": "catalog-scraper",
+  "version": "1.0.0",
+  "description": "Daily scraper for computer catalog",
+  "main": "scraper.js",
+  "scripts": {
+    "scrape": "node scraper.js"
+  },
+  "dependencies": {
+    "puppeteer": "^21.0.0"
+  }
+}
