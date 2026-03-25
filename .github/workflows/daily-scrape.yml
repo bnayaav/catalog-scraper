@@ -1,0 +1,43 @@
+name: Daily Catalog Scraper
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # כל יום בשעה 04:00 (07:00 שעון ישראל)
+  workflow_dispatch:       # הרצה ידנית מ-GitHub
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: ./scraper
+
+      - name: Install Puppeteer browsers
+        run: npx puppeteer browsers install chrome
+        working-directory: ./scraper
+
+      - name: Run scraper
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_NAMESPACE: ${{ secrets.CF_KV_NAMESPACE }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CDATA_PASS: ${{ secrets.CDATA_PASS }}
+          MORLEVI_PASS: ${{ secrets.MORLEVI_PASS }}
+          AMTEL_PASS: ${{ secrets.AMTEL_PASS }}
+          TECHNO_PASS: ${{ secrets.TECHNO_PASS }}
+        run: node scraper.js
+        working-directory: ./scraper
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ Scraper failed! Check logs above."
