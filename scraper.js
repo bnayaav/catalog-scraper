@@ -63,10 +63,16 @@ async function scrapeCData(page) {
   try {
     // Login
     await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'networkidle2' });
-    await page.type('#Email', process.env.SCRAPER_USER);
-    await page.type('#Password', process.env.CDATA_PASS || '200480903');
-    await page.click('button[type="submit"], input[type="submit"]');
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+    await sleep(2000);
+    await page.evaluate((user, pass) => {
+      document.querySelectorAll('input').forEach(i => {
+        const n = (i.name||i.id||'').toLowerCase();
+        if (i.type==='email' || n.includes('email') || n.includes('user')) i.value = user;
+        if (i.type==='password' || n.includes('pass')) i.value = pass;
+      });
+    }, process.env.SCRAPER_USER||'', process.env.CDATA_PASS||'');
+    const cdBtn = await page.$('button[type="submit"]') || await page.$('input[type="submit"]');
+    if (cdBtn) { await cdBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
     console.log('  ✅ C-Data logged in');
 
     // Categories to scrape
@@ -141,10 +147,16 @@ async function scrapeMorelevi(page) {
   try {
     // Login
     await page.goto('https://www.morlevi.co.il/Login', { waitUntil: 'networkidle2' });
-    await page.type('input[type="email"], input[name="email"]', process.env.CDATA_USER || process.env.SCRAPER_USER);
-    await page.type('input[type="password"]', process.env.MORLEVI_PASS || '20042004');
-    await page.click('button[type="submit"], .login-btn');
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+    await sleep(2000);
+    await page.evaluate((user, pass) => {
+      document.querySelectorAll('input').forEach(i => {
+        const n = (i.name||i.id||i.placeholder||'').toLowerCase();
+        if (i.type==='email' || n.includes('email') || n.includes('mail')) i.value = user;
+        if (i.type==='password' || n.includes('pass')) i.value = pass;
+      });
+    }, process.env.SCRAPER_USER||'', process.env.MORLEVI_PASS||'');
+    const mlBtn = await page.$('button[type="submit"]') || await page.$('.login-btn');
+    if (mlBtn) { await mlBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
     console.log('  ✅ Morlevi logged in');
 
     const categories = [
@@ -284,10 +296,14 @@ async function scrapeTechnoRezef(page) {
 
   try {
     await page.goto('https://techno-rezef.com/wp-login.php', { waitUntil: 'networkidle2' });
-    await page.type('#user_login', process.env.CDATA_USER || process.env.SCRAPER_USER);
-    await page.type('#user_pass', process.env.TECHNO_PASS || '200480903');
-    await page.click('#wp-submit');
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+    await sleep(2000);
+    await page.evaluate((user, pass) => {
+      const u = document.querySelector('#user_login') || document.querySelector('input[name="log"]');
+      const p = document.querySelector('#user_pass') || document.querySelector('input[name="pwd"]');
+      if(u) u.value=user; if(p) p.value=pass;
+    }, process.env.SCRAPER_USER||'', process.env.TECHNO_PASS||'');
+    const tBtn = await page.$('#wp-submit') || await page.$('input[type="submit"]');
+    if(tBtn) { await tBtn.click(); await page.waitForNavigation({waitUntil:'networkidle2',timeout:15000}).catch(()=>{}); }
     console.log('  ✅ Techno Rezef logged in');
 
     const categories = [
@@ -419,16 +435,16 @@ async function scrapeAtomic(page) {
       await sleep(3000);
 
       // Load more products
-      let loadMore = true;
-      while (loadMore) {
-        const btn = await page.$('button:contains("טען עוד"), button:contains("Load more")');
-        if (!btn) break;
-        await btn.click();
+      for (let i = 0; i < 5; i++) {
+        const clicked = await page.evaluate(() => {
+          const btn = [...document.querySelectorAll('button')].find(b => 
+            b.textContent.includes('טען עוד') || b.textContent.toLowerCase().includes('load more'));
+          if (btn) { btn.click(); return true; }
+          return false;
+        });
+        if (!clicked) break;
         await sleep(2000);
-        const stillHas = await page.$('button:contains("טען עוד"), button:contains("Load more")');
-        loadMore = !!stillHas;
       }
-
       const items = await page.evaluate(() => {
         return [...document.querySelectorAll('a[href*="/products/"]')].map(el => ({
           title: el.querySelector('p.line-clamp-3, p.font-medium')?.textContent?.trim() || '',
