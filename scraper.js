@@ -341,7 +341,8 @@ async function scrapeTechnoRezef(page) {
   try {
     await page.goto('https://techno-rezef.com/account/login', { waitUntil: 'networkidle2' });
     await sleep(2000);
-    await page.waitForSelector('#customer-email', { timeout: 10000 });
+    await sleep(3000);
+    await page.waitForSelector('#customer-email', { timeout: 20000 });
     await page.type('#customer-email', process.env.SCRAPER_USER || '');
     await page.type('#customer-password', process.env.TECHNO_PASS || '');
     await page.click('button.btn--primary');
