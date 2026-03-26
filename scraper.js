@@ -513,18 +513,30 @@ async function saveToKV(newProducts) {
   const existing = [...existing1, ...existing2];
   console.log(`  Existing: ${existing.length} products`);
 
-  // Merge: update existing by title+supplier, add new ones
-  const merged = [...existing];
-  for (const np of newProducts) {
-    const idx = merged.findIndex(p => p.title === np.title && p.supplier === np.supplier);
-    if (idx >= 0) {
-      merged[idx] = { ...merged[idx], ...np }; // update price/stock
+  // Which suppliers were scraped this run
+  const scrapedSuppliers = [...new Set(newProducts.map(p => p.supplier))];
+  console.log('  Scraped suppliers:', scrapedSuppliers);
+
+  // Merge: update existing, mark missing as אזל
+  const merged = existing.map(p => {
+    // Only update stock for suppliers that were scraped
+    if (!scrapedSuppliers.includes(p.supplier)) return p;
+    
+    const found = newProducts.find(np => np.title === p.title && np.supplier === p.supplier);
+    if (found) {
+      return { ...p, ...found }; // עדכן מחיר ומלאי
     } else {
-      merged.push(np); // new product
+      return { ...p, stock: 'אזל' }; // לא נמצא בסריקה = אזל
     }
+  });
+
+  // Add brand new products
+  for (const np of newProducts) {
+    const exists = merged.find(p => p.title === np.title && p.supplier === np.supplier);
+    if (!exists) merged.push(np);
   }
 
-  console.log(`  Merged: ${merged.length} products`);
+  console.log(`  Merged: ${merged.length} products (${merged.filter(p=>p.stock==='אזל').length} אזל)`);
 
   // Split and save
   const mid = Math.ceil(merged.length / 2);
