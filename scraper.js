@@ -494,23 +494,50 @@ async function scrapeCMS(page) {
 }
 
 
-async function saveToKV(products) {
-  console.log(`\n💾 Saving ${products.length} products to Cloudflare KV...`);
-  const url = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE}/values/catalog`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Authorization': `Bearer ${CF_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(products),
-  });
-  if (!res.ok) throw new Error(`KV save failed: ${await res.text()}`);
-  console.log('✅ Saved to KV successfully');
-  const meta = { lastUpdate: new Date().toISOString(), count: products.length,
-    bySupplier: products.reduce((a,p) => { a[p.supplier]=(a[p.supplier]||0)+1; return a; }, {}) };
-  await fetch(url.replace('/catalog','/catalog_meta'), {
-    method: 'PUT',
-    headers: { 'Authorization': `Bearer ${CF_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(meta),
-  });
+async function saveToKV(newProducts) {
+  console.log(`\n💾 Merging ${newProducts.length} scraped products with existing KV...`);
+  const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE}/values`;
+  const headers = { 'Authorization': `Bearer ${CF_API_TOKEN}`, 'Content-Type': 'application/json' };
+
+  // Load existing products from KV (both parts)
+  const [r1, r2] = await Promise.all([
+    fetch(`${baseUrl}/catalog_1`, { headers: { 'Authorization': `Bearer ${CF_API_TOKEN}` } }),
+    fetch(`${baseUrl}/catalog_2`, { headers: { 'Authorization': `Bearer ${CF_API_TOKEN}` } }),
+  ]);
+  const existing1 = r1.ok ? await r1.json() : [];
+  const existing2 = r2.ok ? await r2.json() : [];
+  const existing = [...existing1, ...existing2];
+  console.log(`  Existing: ${existing.length} products`);
+
+  // Merge: update existing by title+supplier, add new ones
+  const merged = [...existing];
+  for (const np of newProducts) {
+    const idx = merged.findIndex(p => p.title === np.title && p.supplier === np.supplier);
+    if (idx >= 0) {
+      merged[idx] = { ...merged[idx], ...np }; // update price/stock
+    } else {
+      merged.push(np); // new product
+    }
+  }
+
+  console.log(`  Merged: ${merged.length} products`);
+
+  // Split and save
+  const mid = Math.ceil(merged.length / 2);
+  const [s1, s2] = await Promise.all([
+    fetch(`${baseUrl}/catalog_1`, { method:'PUT', headers, body: JSON.stringify(merged.slice(0, mid)) }),
+    fetch(`${baseUrl}/catalog_2`, { method:'PUT', headers, body: JSON.stringify(merged.slice(mid)) }),
+  ]);
+
+  if (s1.ok && s2.ok) {
+    console.log('✅ Saved to KV successfully');
+  } else {
+    throw new Error('KV save failed');
+  }
+
+  const meta = { lastUpdate: new Date().toISOString(), count: merged.length,
+    bySupplier: merged.reduce((a,p) => { a[p.supplier]=(a[p.supplier]||0)+1; return a; }, {}) };
+  await fetch(`${baseUrl}/catalog_meta`, { method:'PUT', headers, body: JSON.stringify(meta) });
   console.log('📊 Stats:', meta.bySupplier);
 }
 
