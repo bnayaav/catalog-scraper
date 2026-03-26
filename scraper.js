@@ -494,6 +494,27 @@ async function scrapeCMS(page) {
 }
 
 
+async function saveToKV(products) {
+  console.log(`\n💾 Saving ${products.length} products to Cloudflare KV...`);
+  const url = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE}/values/catalog`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${CF_API_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(products),
+  });
+  if (!res.ok) throw new Error(`KV save failed: ${await res.text()}`);
+  console.log('✅ Saved to KV successfully');
+  const meta = { lastUpdate: new Date().toISOString(), count: products.length,
+    bySupplier: products.reduce((a,p) => { a[p.supplier]=(a[p.supplier]||0)+1; return a; }, {}) };
+  await fetch(url.replace('/catalog','/catalog_meta'), {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${CF_API_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(meta),
+  });
+  console.log('📊 Stats:', meta.bySupplier);
+}
+
+
 async function main() {
   console.log('🚀 Starting catalog scrape:', new Date().toLocaleString('he-IL'));
 
