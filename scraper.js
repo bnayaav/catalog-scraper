@@ -280,35 +280,48 @@ async function scrapeAmtel(page) {
     ];
 
     for (const catUrl of categories) {
-      await page.goto(catUrl, { waitUntil: 'networkidle2' });
-      await sleep(2000);
+      let pageNum = 1;
+      let hasMore = true;
 
-      const items = await page.evaluate(() => {
-        return [...document.querySelectorAll('.layout_list_item')].map(el => ({
+      while (hasMore) {
+        const url = pageNum === 1 ? catUrl : `${catUrl}?page=${pageNum}`;
+        await page.goto(url, { waitUntil: 'networkidle2' });
+        await sleep(2000);
+
+        const items = await page.evaluate(() => {
+          return [...document.querySelectorAll('.layout_list_item')].map(el => ({
             title: el.querySelector('.list_item_title_with_brand, .list_item_title')?.textContent?.trim() || '',
             price: el.querySelector('.list_item_show_price')?.textContent?.trim() || '',
             img: el.querySelector('.list_item_image img, img')?.src || '',
             url: el.querySelector('a')?.href || '',
             stock: el.querySelector('[class*="stock"], [class*="avail"]')?.textContent?.trim() || 'זמין',
           })).filter(p => p.title);
-      });
-
-      for (const item of items) {
-        if (!item.title) continue;
-        products.push({
-          title: item.title,
-          price: item.price,
-          priceNum: parsePrice(item.price),
-          img: item.img,
-          url: item.url,
-          type: detectType(item.title),
-          supplier: 'Amtel',
-          brand: detectBrand(item.title),
-          stock: item.stock.includes('אזל') ? 'אזל' : 'זמין',
-          ...extractSpecs(item.title),
         });
+
+        console.log(`    Amtel ${catUrl.split('/').pop()} page ${pageNum}: ${items.length} products`);
+        if (items.length === 0) break;
+
+        for (const item of items) {
+          products.push({
+            title: item.title,
+            price: item.price,
+            priceNum: parsePrice(item.price),
+            img: item.img,
+            url: item.url,
+            type: detectType(item.title),
+            supplier: 'Amtel',
+            brand: detectBrand(item.title),
+            stock: item.stock.includes('אזל') ? 'אזל' : 'זמין',
+            ...extractSpecs(item.title),
+          });
+        }
+
+        const hasNext = await page.$('div.pagination a.next_page');
+        hasMore = !!hasNext;
+        pageNum++;
+        if (pageNum > 20) break;
+        await sleep(1000);
       }
-      console.log(`    Amtel ${catUrl.split('/').pop()}: ${items.length} products`);
     }
   } catch (e) {
     console.error('  ❌ Amtel error:', e.message);
@@ -332,13 +345,13 @@ async function scrapeTechnoRezef(page) {
     await page.type('#customer-email', process.env.SCRAPER_USER || '');
     await page.type('#customer-password', process.env.TECHNO_PASS || '');
     await page.click('button.btn--primary');
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(()=>{});
-    await sleep(2000);
+    await sleep(4000);
+    // Wait for redirect to /account
+    await page.waitForFunction(() => !window.location.href.includes('/account/login'), { timeout: 15000 }).catch(()=>{});
+    await sleep(1000);
     console.log('  ✅ Techno logged in, URL:', page.url());
 
     const categories = [
-      { url: 'https://techno-rezef.com/collections/laptops', type: 'נייד' },
-      { url: 'https://techno-rezef.com/collections/desktops', type: 'נייח' },
       { url: 'https://techno-rezef.com/collections/all', type: null },
     ];
 
@@ -365,12 +378,6 @@ async function scrapeTechnoRezef(page) {
 
         console.log(`    Techno page ${pageNum}: ${items.length} products`);
         if (items.length === 0) break;
-        // Check if we're getting duplicate content (same page repeating)
-        const firstTitle = items[0]?.title || '';
-        if (pageNum > 1 && products.find(p => p.title === firstTitle)) {
-          console.log('    Techno: duplicate content detected, stopping');
-          break;
-        }
 
         for (const item of items) {
           products.push({
@@ -387,8 +394,9 @@ async function scrapeTechnoRezef(page) {
           });
         }
 
+        // Shopify stops returning items when page exceeds total
         pageNum++;
-        if (pageNum > 20) break;
+        if (pageNum > 50) break;
         await sleep(1000);
       }
     }
