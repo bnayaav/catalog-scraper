@@ -220,8 +220,12 @@ async function scrapeMorelevi(page) {
         for (const item of items) {
           if (!item.title) continue;
           const specs = extractSpecs(item.title);
-          const stock = item.stock.includes('green') ? 'זמין' :
-                       item.stock.includes('red') ? 'אזל' : '';
+          // stockMsg classes: green=זמין, red=אזל, yellow=מוגבל
+          const stockClass = item.stock.toLowerCase();
+          const stock = stockClass.includes('red') ? 'אזל' :
+                        stockClass.includes('green') ? 'זמין' :
+                        stockClass.includes('yellow') ? 'מוגבל' : '';
+          if (stock === 'אזל') continue; // דלג על מוצרים שאזלו
           products.push({
             title: item.title,
             price: item.price || '',
