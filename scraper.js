@@ -736,9 +736,6 @@ async function main() {
     const hareli = await scrapeHareli(page);
     allProducts.push(...hareli);
 
-    const hareli = await scrapeHareli(page);
-    allProducts.push(...hareli);
-
   } finally {
     await browser.close();
   }
