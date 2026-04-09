@@ -582,11 +582,16 @@ async function scrapeHareli(page) {
   const products = [];
 
   try {
-    // API פתוח — ללא לוגין
-    const response = await page.evaluate(async () => {
-      const r = await fetch('https://harelserver778.herokuapp.com/?lang=he');
-      return await r.json();
+    // API פתוח — ללא לוגין, fetch ישיר
+    const res = await fetch('https://harelserver778.herokuapp.com/?lang=he', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://catalog.hareli.co.il/',
+        'Origin': 'https://catalog.hareli.co.il',
+      }
     });
+    const response = await res.json();
 
     console.log(`  📦 Hareli API returned: ${response.length} items`);
 
