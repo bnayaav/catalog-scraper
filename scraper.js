@@ -208,7 +208,7 @@ async function scrapeMorelevi(page) {
             return {
               title: wrap?.querySelector('h5.title, h5, h2')?.textContent?.trim() || '',
               price: wrap?.querySelector('small.price, .price')?.textContent?.trim() || '',
-              img: el.querySelector('img')?.src || '',
+              img: (() => { const src = el.querySelector('a#mainpic img, .product-thumb img, img.img-fluid')?.src || ''; return src.startsWith('/') ? 'https://www.morlevi.co.il' + src : src; })(),
               url: wrap?.querySelector('a[href*="/product/"]')?.href || '',
               stock: wrap?.querySelector('.stockMsg')?.className || '',
             };
@@ -498,6 +498,147 @@ async function scrapeCMS(page) {
 }
 
 
+// ══════════════════════════════════════════
+// SCRAPER 7: Hareli (catalog.hareli.co.il)
+// ══════════════════════════════════════════
+async function scrapeHareli(page) {
+  console.log('🔍 Scraping Hareli...');
+  const products = [];
+
+  try {
+    // כל המוצרים נטענים ב-JS bundle — סורק קטגוריה קטגוריה
+    const categoryIds = [5001,5002,5003,5004,5005,5006,5007,5008,5009,
+                         5010,5011,5012,5013,5014,5017,5018,5030];
+
+    for (const catId of categoryIds) {
+      await page.goto(`https://catalog.hareli.co.il/products/${catId}`, 
+        { waitUntil: 'networkidle2', timeout: 20000 });
+      await sleep(3000);
+
+      const catItems = await page.evaluate(() => {
+        const results = [];
+        document.querySelectorAll('.singleProduct').forEach(card => {
+          const spans = [...card.querySelectorAll('span')];
+          const img = card.querySelector('img');
+          
+          // שם המוצר — span ראשון עם טקסט
+          const nameSpan = spans.find(s => s.textContent.trim().length > 5 
+            && !s.textContent.includes('₪'));
+          
+          // מחיר — span עם מספר בלבד
+          const priceSpan = spans.find(s => /^[\d,]+$/.test(s.textContent.trim()));
+          
+          // קטגוריה
+          const catSpans = spans.filter(s => s.className.includes('border-bottom'));
+          
+          if (nameSpan) {
+            results.push({
+              title: nameSpan.textContent.trim(),
+              price: priceSpan ? priceSpan.textContent.trim() : '',
+              img: img ? img.src : '',
+              category: catSpans[0]?.textContent?.trim() || '',
+              subCategory: catSpans[1]?.textContent?.trim() || '',
+            });
+          }
+        });
+        return results;
+      });
+
+      console.log(`    Hareli cat ${catId}: ${catItems.length} products`);
+
+      for (const item of catItems) {
+        if (!item.title || item.title.length < 3) continue;
+        const priceNum = parseInt(item.price.replace(/[^\d]/g,'')) || 0;
+        products.push({
+          title: item.title,
+          price: item.price ? `${item.price} ₪` : '',
+          priceNum,
+          img: item.img,
+          url: `https://catalog.hareli.co.il/products/${catId}`,
+          type: detectType(item.title),
+          supplier: 'Hareli',
+          brand: detectBrand(item.title),
+          stock: 'זמין',
+          category: item.category,
+          ...extractSpecs(item.title),
+        });
+      }
+      await sleep(1000);
+    }
+  } catch (e) {
+    console.error('  ❌ Hareli error:', e.message);
+  }
+
+  console.log(`  ✅ Hareli: ${products.length} products`);
+  return products;
+}
+
+
+// ══════════════════════════════════════════
+// SCRAPER 7: הראל (Hareli) — API ישיר
+// ══════════════════════════════════════════
+async function scrapeHareli(page) {
+  console.log('🔍 Scraping Hareli...');
+  const products = [];
+
+  try {
+    // API פתוח — ללא לוגין
+    const response = await page.evaluate(async () => {
+      const r = await fetch('https://harelserver778.herokuapp.com/?lang=he');
+      return await r.json();
+    });
+
+    console.log(`  📦 Hareli API returned: ${response.length} items`);
+
+    for (const item of response) {
+      if (!item.Description || !item.Price) continue;
+
+      const price = parseFloat(item.Price) || 0;
+      const imgUrl = item.ItemKey 
+        ? `https://bucketeer-b1012d45-3216-4739-85bc-6483e7e00523.s3.eu-west-1.amazonaws.com/${item.ItemKey}.png`
+        : '';
+
+      // זיהוי סוג מוצר לפי קטגוריה
+      const cat = (item.MainCategory || '') + ' ' + (item.SubCategory || '');
+      let type = '';
+      if (/מחשב נייד|לפטופ|laptop/i.test(cat)) type = 'נייד';
+      else if (/מחשב נייח|desktop/i.test(cat)) type = 'נייח';
+      else if (/טאבלט|tablet/i.test(cat)) type = 'טאבלט';
+      else if (/טלפון|סמארטפון|mobile/i.test(cat)) type = 'טלפון';
+
+      products.push({
+        title: item.Description,
+        price: `₪${price}`,
+        priceNum: price,
+        img: imgUrl,
+        url: `https://catalog.hareli.co.il/products/${item.SubCat}`,
+        type,
+        supplier: 'Hareli',
+        brand: detectBrand(item.Description),
+        stock: 'זמין',
+        cpu: '',
+        ram: '',
+        storage: '',
+        gpu: '',
+        category: item.MainCategory || '',
+        subCategory: item.SubCategory || '',
+      });
+    }
+
+    // סטטיסטיקה לפי קטגוריה
+    const cats = {};
+    products.forEach(p => { cats[p.category] = (cats[p.category]||0)+1; });
+    console.log('  Categories:', cats);
+
+  } catch (e) {
+    console.error('  ❌ Hareli error:', e.message);
+  }
+
+  console.log(`  ✅ Hareli: ${products.length} products`);
+  return products;
+}
+
+
 async function saveToKV(newProducts) {
   console.log(`\n💾 Merging ${newProducts.length} scraped products with existing KV...`);
   const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE}/values`;
@@ -591,6 +732,12 @@ async function main() {
 
     const cms = await scrapeCMS(page);
     allProducts.push(...cms);
+
+    const hareli = await scrapeHareli(page);
+    allProducts.push(...hareli);
+
+    const hareli = await scrapeHareli(page);
+    allProducts.push(...hareli);
 
   } finally {
     await browser.close();
