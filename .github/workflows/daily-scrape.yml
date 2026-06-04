@@ -35,8 +35,6 @@ jobs:
           MORLEVI_PASS: ${{ secrets.MORLEVI_PASS }}
           AMTEL_USER: ${{ secrets.AMTEL_USER }}
           AMTEL_PASS: ${{ secrets.AMTEL_PASS }}
-          TECHNO_USER: ${{ secrets.TECHNO_USER }}
-          TECHNO_PASS: ${{ secrets.TECHNO_PASS }}
           ATOMIC_USER: ${{ secrets.ATOMIC_USER }}
           ATOMIC_PASS: ${{ secrets.ATOMIC_PASS }}
           CMS_USER: ${{ secrets.CMS_USER }}
