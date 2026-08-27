@@ -66,10 +66,10 @@ async function scrapeCData(page) {
     // Login via direct HTTP POST (bypass Puppeteer WAF block)
     await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'load', timeout: 30000 });
     await sleep(3000);
-    
+
     const emailFound = await page.$('#Email');
     console.log('    #Email found:', !!emailFound);
-    
+
     if (!emailFound) {
       console.log('  ⚠️ C-Data: WAF blocking GitHub IP, skipping');
       return products;
@@ -160,7 +160,7 @@ async function scrapeMorelevi(page) {
     // Morlevi - login via modal popup
     await page.goto('https://www.morlevi.co.il', { waitUntil: 'networkidle2' });
     await sleep(2000);
-    
+
     // Click login button to open modal
     const loginBtn = await page.$('a[href*="login"], button[data-target*="login"], .login-btn, a.nav-link[href*="login"]');
     if (loginBtn) {
@@ -175,14 +175,14 @@ async function scrapeMorelevi(page) {
       });
       await sleep(1500);
     }
-    
+
     // Fill modal form
     await page.waitForSelector('#email', { timeout: 5000 }).catch(()=>{});
     await page.type('#email', process.env.SCRAPER_USER || '');
     await page.type('#Password', process.env.MORLEVI_PASS || '');
     await page.click('button[type="submit"].btn-primary');
     await sleep(3000);
-    
+
     const afterUrl = page.url();
     console.log('    Morlevi URL after login:', afterUrl);
     await sleep(2000);
@@ -423,12 +423,12 @@ async function scrapeAtomic(page) {
   try {
     await page.goto('https://atomiconline.co.il/login', { waitUntil: 'networkidle2' });
     await sleep(2000);
-    
+
     const emailInput = await page.$('input[type="email"], input[name="email"], input[placeholder*="mail"]');
     if (emailInput) await emailInput.type(process.env.SCRAPER_USER);
     const passInput = await page.$('input[type="password"]');
     if (passInput) await passInput.type(process.env.ATOMIC_PASS || '');
-    
+
     const submitBtn = await page.$('button[type="submit"]');
     if (submitBtn) { await submitBtn.click(); await page.waitForNavigation({ waitUntil: 'networkidle2' }); }
     console.log('  ✅ Atomic logged in');
@@ -445,7 +445,7 @@ async function scrapeAtomic(page) {
       // Load more products
       for (let i = 0; i < 5; i++) {
         const clicked = await page.evaluate(() => {
-          const btn = [...document.querySelectorAll('button')].find(b => 
+          const btn = [...document.querySelectorAll('button')].find(b =>
             b.textContent.includes('טען עוד') || b.textContent.toLowerCase().includes('load more'));
           if (btn) { btn.click(); return true; }
           return false;
@@ -489,6 +489,154 @@ async function scrapeAtomic(page) {
 }
 
 // ══════════════════════════════════════════
+// SCRAPER: Semicom (Magento) — כל האתר, מסודר לפי קטגוריות + 30% רווח
+//
+// לא נדרשת התחברות. מאתר את כל הקטגוריות מתפריט הניווט הראשי
+// (ולא רק appliances/tools כמו קודם), וסורק כל קטגוריה בנפרד -
+// כך שסדר המוצרים ב-KV הולך קטגוריה-קטגוריה, לפי סדר התפריט של סמיקום.
+// לכל מוצר מתווסף שדה category. המחיר מחושב מ-data-price-amount
+// (attribute מדויק של Magento) בתוספת 30% רווח.
+// ══════════════════════════════════════════
+// שימו לב: אין כאן תוספת רווח בכוונה. המחיר שנשמר כאן הוא מחיר הספק הגולמי
+// (ישירות מ-data-price-amount). הרווח מחושב במקום מרוכז אחד — ב-sync.js
+// של comphone-admin — בדיוק כמו אצל אטומיק, כדי שיהיה ניתן לשנות אותו
+// מהגדרות בלי לגעת בסורק או לחכות לריצה הבאה.
+
+async function collectSemicomCategoryUrls(page) {
+  console.log('  🔎 Semicom: מאתר קטגוריות מתפריט הניווט...');
+  let categories = [];
+
+  try {
+    await page.goto('https://www.semicom.co.il/', { waitUntil: 'networkidle2', timeout: 30000 });
+    await sleep(2000);
+
+    categories = await page.evaluate(() => {
+      const results = [];
+      const seen = new Set();
+      const navRoots = document.querySelectorAll('nav.navigation, nav ul.navigation, .navigation');
+      const anchors = navRoots.length
+        ? [...navRoots].flatMap(nav => [...nav.querySelectorAll('a[href]')])
+        : [...document.querySelectorAll('header a[href]')];
+
+      anchors.forEach(a => {
+        const href = a.href;
+        const name = a.textContent.trim();
+        if (!href || !name) return;
+        if (seen.has(href)) return;
+        // דילוג על עמודים שאינם קטגוריות מוצרים
+        if (/account|checkout|cart|search|contact|about|blog|wishlist|compare|login|register|javascript:|#$/i.test(href)) return;
+        if (!href.includes('semicom.co.il')) return;
+        seen.add(href);
+        results.push({ url: href, name });
+      });
+      return results;
+    });
+
+    console.log(`  ✅ Semicom: נמצאו ${categories.length} קטגוריות בתפריט`);
+  } catch (e) {
+    console.error('  ❌ Semicom category discovery error:', e.message);
+  }
+
+  return categories;
+}
+
+async function scrapeSemicomCategory(page, categoryUrl, categoryName) {
+  const products = [];
+  let pageNum = 1;
+  let hasMore = true;
+  const seenPageUrls = new Set(); // הגנת לולאה אינסופית
+
+  while (hasMore) {
+    const url = pageNum === 1 ? categoryUrl : `${categoryUrl}${categoryUrl.includes('?') ? '&' : '?'}p=${pageNum}`;
+    if (seenPageUrls.has(url)) break;
+    seenPageUrls.add(url);
+
+    try {
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
+      await sleep(1500);
+    } catch (e) {
+      console.error(`    ⚠️ Semicom "${categoryName}" עמוד ${pageNum} שגיאת טעינה:`, e.message);
+      break;
+    }
+
+    const items = await page.evaluate(() => {
+      return [...document.querySelectorAll('li.item.product.product-item')].map(card => {
+        const linkEl = card.querySelector('.product-item-name a.product-item-link');
+        const priceEl = card.querySelector('.price-wrapper[data-price-amount]');
+        const imgEl = card.querySelector('img.product-image-photo');
+        const skuEl = card.querySelector('.sku-preview-text');
+        return {
+          title: linkEl?.textContent?.trim() || '',
+          url: linkEl?.href || '',
+          priceAmount: priceEl?.getAttribute('data-price-amount') || '',
+          img: imgEl?.src || imgEl?.getAttribute('data-src') || '',
+          sku: skuEl?.textContent?.trim() || '',
+        };
+      }).filter(p => p.title);
+    });
+
+    console.log(`    Semicom "${categoryName}" עמוד ${pageNum}: ${items.length} מוצרים`);
+    if (items.length === 0) break;
+
+    for (const item of items) {
+      const priceNum = Math.round(parseFloat(item.priceAmount) || 0); // מחיר ספק גולמי, בלי רווח
+      products.push({
+        title: item.title,
+        price: priceNum ? `${priceNum} ₪` : '',
+        priceNum,
+        img: item.img,
+        url: item.url,
+        type: detectType(item.title),
+        supplier: 'Semicom',
+        brand: detectBrand(item.title),
+        stock: 'זמין',
+        category: categoryName,
+        sku: item.sku,
+        ...extractSpecs(item.title),
+      });
+    }
+
+    const hasNext = await page.$('.pages a.action.next');
+    hasMore = !!hasNext && items.length > 0;
+    pageNum++;
+    if (pageNum > 30) break; // הגנת לולאה אינסופית
+    await sleep(1000);
+  }
+
+  return products;
+}
+
+async function scrapeSemicom(page) {
+  console.log('🔍 Scraping Semicom (כל האתר, לפי קטגוריות)...');
+  const allProducts = [];
+  let categories = [];
+
+  try {
+    categories = await collectSemicomCategoryUrls(page);
+
+    for (const cat of categories) {
+      const catProducts = await scrapeSemicomCategory(page, cat.url, cat.name);
+      allProducts.push(...catProducts);
+      await sleep(800);
+    }
+  } catch (e) {
+    console.error('  ❌ Semicom error:', e.message);
+  }
+
+  // דדופ: קודם לפי SKU, ואם אין - לפי שם+URL
+  const seen = new Set();
+  const unique = allProducts.filter(p => {
+    const key = p.sku ? `sku:${p.sku}` : `${p.supplier}:${p.title}:${p.url}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  console.log(`  ✅ Semicom: ${unique.length} מוצרים ייחודיים מתוך ${categories.length} קטגוריות`);
+  return unique;
+}
+
+// ══════════════════════════════════════════
 // SCRAPER 6: CMS
 // ══════════════════════════════════════════
 async function scrapeCMS(page) {
@@ -499,11 +647,25 @@ async function scrapeCMS(page) {
 
 
 // ══════════════════════════════════════════
-// SCRAPER 7: Hareli (catalog.hareli.co.il)
+// SCRAPER 7: הראל (Hareli) — סריקת DOM לפי קטגוריה
+//
+// תיקון: היו כאן בעבר שתי פונקציות scrapeHareli באותו שם - גרסת ה-DOM
+// (שכיסתה את כל הקטגוריות כולל 5017="מכשירים") וגרסת API ישיר
+// (harelserver778.herokuapp.com, שמכסה רק "רמקולים ואוזניות" ו"סוללות").
+// ב-JS ההגדרה השנייה "דורסת" את הראשונה בשקט - בפועל רק גרסת ה-API
+// רצה כל הזמן, ולכן קטגוריית "מכשירים" (5017) מעולם לא הגיעה ל-KV.
+// זו הפונקציה המאוחדת היחידה עכשיו - מבוססת DOM (מכסה גם 5017),
+// עם תוספת מחיר קבועה של 400 ₪ לכל מוצר בקטגוריית "מכשירים" בלבד.
 // ══════════════════════════════════════════
 async function scrapeHareli(page) {
   console.log('🔍 Scraping Hareli...');
   const products = [];
+
+  // תוספת מחיר קבועה לקטגוריית "מכשירים" (ID 5017) בלבד.
+  // המחיר אצל הראל מוצג "כולל מע"מ" - לכן זו תוספת שקלית פשוטה,
+  // בלי מכפיל מע"מ נוסף (בשונה מנוסחת Atomic/Lenovo).
+  const HARELI_MACHINES_CATEGORY_ID = 5017;
+  const HARELI_MACHINES_MARKUP = 400;
 
   try {
     // כל המוצרים נטענים ב-JS bundle — סורק קטגוריה קטגוריה
@@ -511,26 +673,37 @@ async function scrapeHareli(page) {
                          5010,5011,5012,5013,5014,5017,5018,5030];
 
     for (const catId of categoryIds) {
-      await page.goto(`https://catalog.hareli.co.il/products/${catId}`, 
+      await page.goto(`https://catalog.hareli.co.il/products/${catId}`,
         { waitUntil: 'networkidle2', timeout: 20000 });
       await sleep(3000);
+
+      // גלילה למטה עד שכמות המוצרים מתייצבת - תופס גם מוצרים ב-lazy load
+      let lastCount = -1;
+      let stableRounds = 0;
+      for (let i = 0; i < 15 && stableRounds < 2; i++) {
+        const count = await page.evaluate(() => document.querySelectorAll('.singleProduct').length);
+        stableRounds = count === lastCount ? stableRounds + 1 : 0;
+        lastCount = count;
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await sleep(700);
+      }
 
       const catItems = await page.evaluate(() => {
         const results = [];
         document.querySelectorAll('.singleProduct').forEach(card => {
           const spans = [...card.querySelectorAll('span')];
           const img = card.querySelector('img');
-          
+
           // שם המוצר — span ראשון עם טקסט
-          const nameSpan = spans.find(s => s.textContent.trim().length > 5 
+          const nameSpan = spans.find(s => s.textContent.trim().length > 5
             && !s.textContent.includes('₪'));
-          
+
           // מחיר — span עם מספר בלבד
           const priceSpan = spans.find(s => /^[\d,]+$/.test(s.textContent.trim()));
-          
+
           // קטגוריה
           const catSpans = spans.filter(s => s.className.includes('border-bottom'));
-          
+
           if (nameSpan) {
             results.push({
               title: nameSpan.textContent.trim(),
@@ -548,10 +721,16 @@ async function scrapeHareli(page) {
 
       for (const item of catItems) {
         if (!item.title || item.title.length < 3) continue;
-        const priceNum = parseInt(item.price.replace(/[^\d]/g,'')) || 0;
+        let priceNum = parseInt(item.price.replace(/[^\d]/g,'')) || 0;
+
+        // תוספת 400 ₪ רק למוצרים בקטגוריית "מכשירים" (5017)
+        if (catId === HARELI_MACHINES_CATEGORY_ID && priceNum > 0) {
+          priceNum += HARELI_MACHINES_MARKUP;
+        }
+
         products.push({
           title: item.title,
-          price: item.price ? `${item.price} ₪` : '',
+          price: priceNum ? `${priceNum} ₪` : '',
           priceNum,
           img: item.img,
           url: `https://catalog.hareli.co.il/products/${catId}`,
@@ -560,81 +739,12 @@ async function scrapeHareli(page) {
           brand: detectBrand(item.title),
           stock: 'זמין',
           category: item.category,
+          subCategory: item.subCategory,
           ...extractSpecs(item.title),
         });
       }
       await sleep(1000);
     }
-  } catch (e) {
-    console.error('  ❌ Hareli error:', e.message);
-  }
-
-  console.log(`  ✅ Hareli: ${products.length} products`);
-  return products;
-}
-
-
-// ══════════════════════════════════════════
-// SCRAPER 7: הראל (Hareli) — API ישיר
-// ══════════════════════════════════════════
-async function scrapeHareli(page) {
-  console.log('🔍 Scraping Hareli...');
-  const products = [];
-
-  try {
-    // API פתוח — ללא לוגין, fetch ישיר
-    const res = await fetch('https://harelserver778.herokuapp.com/?lang=he', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://catalog.hareli.co.il/',
-        'Origin': 'https://catalog.hareli.co.il',
-      }
-    });
-    const response = await res.json();
-
-    console.log(`  📦 Hareli API returned: ${response.length} items`);
-
-    for (const item of response) {
-      if (!item.Description || !item.Price) continue;
-
-      const price = parseFloat(item.Price) || 0;
-      const imgUrl = item.ItemKey 
-        ? `https://bucketeer-b1012d45-3216-4739-85bc-6483e7e00523.s3.eu-west-1.amazonaws.com/${item.ItemKey}.png`
-        : '';
-
-      // זיהוי סוג מוצר לפי קטגוריה
-      const cat = (item.MainCategory || '') + ' ' + (item.SubCategory || '');
-      let type = '';
-      if (/מחשב נייד|לפטופ|laptop/i.test(cat)) type = 'נייד';
-      else if (/מחשב נייח|desktop/i.test(cat)) type = 'נייח';
-      else if (/טאבלט|tablet/i.test(cat)) type = 'טאבלט';
-      else if (/טלפון|סמארטפון|mobile/i.test(cat)) type = 'טלפון';
-
-      products.push({
-        title: item.Description,
-        price: `₪${price}`,
-        priceNum: price,
-        img: imgUrl,
-        url: `https://catalog.hareli.co.il/products/${item.SubCat}`,
-        type,
-        supplier: 'Hareli',
-        brand: detectBrand(item.Description),
-        stock: 'זמין',
-        cpu: '',
-        ram: '',
-        storage: '',
-        gpu: '',
-        category: item.MainCategory || '',
-        subCategory: item.SubCategory || '',
-      });
-    }
-
-    // סטטיסטיקה לפי קטגוריה
-    const cats = {};
-    products.forEach(p => { cats[p.category] = (cats[p.category]||0)+1; });
-    console.log('  Categories:', cats);
-
   } catch (e) {
     console.error('  ❌ Hareli error:', e.message);
   }
@@ -667,7 +777,7 @@ async function saveToKV(newProducts) {
   const merged = existing.map(p => {
     // Only update stock for suppliers that were scraped
     if (!scrapedSuppliers.includes(p.supplier)) return p;
-    
+
     const found = newProducts.find(np => np.title === p.title && np.supplier === p.supplier);
     if (found) {
       return { ...p, ...found }; // עדכן מחיר ומלאי
@@ -734,6 +844,9 @@ async function main() {
 
     const atomic = await scrapeAtomic(page);
     allProducts.push(...atomic);
+
+    const semicom = await scrapeSemicom(page);
+    allProducts.push(...semicom);
 
     const cms = await scrapeCMS(page);
     allProducts.push(...cms);
