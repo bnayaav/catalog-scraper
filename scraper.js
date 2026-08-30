@@ -502,43 +502,242 @@ async function scrapeAtomic(page) {
 // של comphone-admin — בדיוק כמו אצל אטומיק, כדי שיהיה ניתן לשנות אותו
 // מהגדרות בלי לגעת בסורק או לחכות לריצה הבאה.
 
-async function collectSemicomCategoryUrls(page) {
-  console.log('  🔎 Semicom: מאתר קטגוריות מתפריט הניווט...');
-  let categories = [];
-
-  try {
-    await page.goto('https://www.semicom.co.il/', { waitUntil: 'networkidle2', timeout: 30000 });
-    await sleep(2000);
-
-    categories = await page.evaluate(() => {
-      const results = [];
-      const seen = new Set();
-      const navRoots = document.querySelectorAll('nav.navigation, nav ul.navigation, .navigation');
-      const anchors = navRoots.length
-        ? [...navRoots].flatMap(nav => [...nav.querySelectorAll('a[href]')])
-        : [...document.querySelectorAll('header a[href]')];
-
-      anchors.forEach(a => {
-        const href = a.href;
-        const name = a.textContent.trim();
-        if (!href || !name) return;
-        if (seen.has(href)) return;
-        // דילוג על עמודים שאינם קטגוריות מוצרים
-        if (/account|checkout|cart|search|contact|about|blog|wishlist|compare|login|register|javascript:|#$/i.test(href)) return;
-        if (!href.includes('semicom.co.il')) return;
-        seen.add(href);
-        results.push({ url: href, name });
-      });
-      return results;
-    });
-
-    console.log(`  ✅ Semicom: נמצאו ${categories.length} קטגוריות בתפריט`);
-  } catch (e) {
-    console.error('  ❌ Semicom category discovery error:', e.message);
-  }
-
-  return categories;
-}
+// רשימת קטגוריות קבועה — חולצה ישירות מה-HTML האמיתי של תפריט הניווט
+// (semicom.co.il). לא מתגלה דינמית מהאתר בזמן ריצה, כי GitHub Actions
+// נחסם ע"י הגנת הבוטים של האתר כשניסינו לגשת לדף הבית ולקרוא את הניווט
+// משם. במקום זה, אנחנו נכנסים ישירות לכל קטגוריה. אם סמיקום ישנו את
+// מבנה הקטגוריות באתר, יש לעדכן את הרשימה הזו בהתאם (ולוודא URL-ים חדשים).
+const SEMICOM_CATEGORIES = [
+  { url: 'https://www.semicom.co.il/outlet', name: '!SALE' },
+  { url: 'https://www.semicom.co.il/outlet/wqvei-tqrh', name: 'תאורה' },
+  { url: 'https://www.semicom.co.il/outlet/mvcri-hwml-lmtbh', name: 'מוצרי חשמל' },
+  { url: 'https://www.semicom.co.il/outlet/svllvt-vmtenim', name: 'אביזרי חשמל' },
+  { url: 'https://www.semicom.co.il/outlet/brzim-vabizri-ambtih', name: 'אביזרי אמבטיה' },
+  { url: 'https://www.semicom.co.il/outlet/mvcri-hvrp', name: 'מוצרים עונתיים' },
+  { url: 'https://www.semicom.co.il/outlet/kli-ebvdh-vginvn', name: 'כלי עבודה וגינון' },
+  { url: 'https://www.semicom.co.il/appliances', name: 'מוצרי חשמל' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances', name: 'מוצרי חשמל למטבח' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/blenders', name: 'בלנדרים' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/toaster-oven', name: 'טוסטרי אובן' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/pressing-toaster', name: 'טוסטר לחיצה' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/gas-stoves', name: 'כיריים גז ואינדוקציה' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/stove-and-hotplates', name: 'כיריים ופלטות חשמליות' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/tanor-afia', name: 'תנורי אפייה' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/meham-from-shabbat', name: 'מיחמים לשבת' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/microwaves', name: 'מיקרוגלים' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/food-processors-and-mixers', name: 'מעבדי מזון ומיקסרים' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/toast', name: 'מצנמים' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/milk-frother', name: 'מקציפי חלב' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/refrigerators', name: 'מקררים' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/mqpiaim', name: 'מקפיאים' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/electric-pots-and-chips', name: 'סירים חשמליים וצ\'יפסרים' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/electric-kettles', name: 'קומקומים חשמליים' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/vegetable-choppers', name: 'קוצצי ירקות' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/to-the-kitchen', name: 'שונות למטבח' },
+  { url: 'https://www.semicom.co.il/appliances/kitchen-appliances/mdihi-kalim', name: 'מדיחי כלים' },
+  { url: 'https://www.semicom.co.il/appliances/home-phones', name: 'טלפונים ביתיים' },
+  { url: 'https://www.semicom.co.il/appliances/fans', name: 'מאווררים לבית' },
+  { url: 'https://www.semicom.co.il/appliances/irons', name: 'מגהצים' },
+  { url: 'https://www.semicom.co.il/appliances/beauty-and-grooming-products', name: 'מוצרי יופי וטיפוח' },
+  { url: 'https://www.semicom.co.il/appliances/tv-converters', name: 'ממירי טלוויזיה' },
+  { url: 'https://www.semicom.co.il/appliances/insects-killer', name: 'קטלנים' },
+  { url: 'https://www.semicom.co.il/appliances/human-weight', name: 'משקל אדם' },
+  { url: 'https://www.semicom.co.il/appliances/vacuum-cleaners', name: 'שואבי אבק' },
+  { url: 'https://www.semicom.co.il/appliances/remote', name: 'שלטים' },
+  { url: 'https://www.semicom.co.il/appliances/heaters-and-hsprinklers', name: 'תנורים ומפזרי חום' },
+  { url: 'https://www.semicom.co.il/appliances/washing-machines-and-dryers', name: 'מכונות כביסה ומייבשים' },
+  { url: 'https://www.semicom.co.il/appliances/stanley-grills', name: 'מוצרי STANLEY' },
+  { url: 'https://www.semicom.co.il/appliances/mvcri-fratelli', name: 'מוצרי FRATELLI' },
+  { url: 'https://www.semicom.co.il/appliances/mvcri-fratelli/tnvrim-bild-ain', name: 'תנורים בנויים / תנורים משולבים' },
+  { url: 'https://www.semicom.co.il/appliances/mvcri-fratelli/qvlti-adim', name: 'קולטי אדים' },
+  { url: 'https://www.semicom.co.il/appliances/mvcri-fratelli/mmqrri-iinvt', name: 'מקררי יינות' },
+  { url: 'https://www.semicom.co.il/appliances/mvcri-fratelli/kiriim-gz-aindvqcih', name: 'כיריים גז/אינדוקציה' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot', name: 'מצברים וסוללות' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/alkaline-gp-batteries', name: 'סוללות אלקליין GP' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/button-batteries-and-for-hearing-aids', name: 'סוללות כפתור וסוללות למכשירי שמיעה' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/tadiran-batteries', name: 'סוללות תדיראן' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/lithium-batteries', name: 'סוללות ליתיום' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/chargers-and-batteries-gp', name: 'מטענים וסוללות נטענות' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/voltage-converters', name: 'ממירי מתח' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/boster', name: 'בוסטרים לרכב' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/amdt-tena-rhv-hsmli', name: 'עמדת טעינה לרכב חשמלי' },
+  { url: 'https://www.semicom.co.il/mcbrim-vsollot/enrgia', name: 'מערכת אגירת אנרגיה' },
+  { url: 'https://www.semicom.co.il/garden', name: 'גינה וגינון' },
+  { url: 'https://www.semicom.co.il/garden/grniqim', name: 'גרניקים' },
+  { url: 'https://www.semicom.co.il/garden/parasols', name: 'שמשיות' },
+  { url: 'https://www.semicom.co.il/garden/mcnni-avvir', name: 'מצנני אוויר' },
+  { url: 'https://www.semicom.co.il/garden/gas-grills-and-ovens', name: 'גרילים גז' },
+  { url: 'https://www.semicom.co.il/garden/cinvrvt-hwqiih', name: 'צינורות השקיה ומחברים' },
+  { url: 'https://www.semicom.co.il/garden/kli-gnvn', name: 'כלי גנון' },
+  { url: 'https://www.semicom.co.il/garden/kli-gnvn/gvzmi-gdr', name: 'גוזמי גדר' },
+  { url: 'https://www.semicom.co.il/garden/kli-gnvn/kli-ginvn-idniim', name: 'כלי גינון ידניים' },
+  { url: 'https://www.semicom.co.il/garden/kli-gnvn/mkshvt-dwa', name: 'מכסחות דשא' },
+  { url: 'https://www.semicom.co.il/garden/kli-gnvn/msvri-wrwrt', name: 'מסורי שרשרת' },
+  { url: 'https://www.semicom.co.il/garden/kli-gnvn/mpvhim-vwvabi-elim', name: 'מפוחים ושואבי עלים' },
+  { url: 'https://www.semicom.co.il/garden/kli-gnvn/hrmwim-hwmliim-vabizrim', name: 'חרמשים חשמליים ואביזרים' },
+  { url: 'https://www.semicom.co.il/garden/rwtvt-cl', name: 'רשתות צל ואוהלים' },
+  { url: 'https://www.semicom.co.il/garden/solhan-vkisa', name: 'שולחנות וכיסאות' },
+  { url: 'https://www.semicom.co.il/ceiling-fans', name: 'מאווררים' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/ceiling-fan', name: 'מאוורר תקרה' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/ceiling-fan-for-room', name: 'מאוורר תקרה לחדר' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/ceiling-fan-for-living-room', name: 'מאוורר תקרה לסלון' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/ceiling-fan-for-pergola', name: 'מאוורר תקרה לפרגולה' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/atkna-mavrr-tikra', name: 'התקנת מאווררי תקרה' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/mgvvn-mavvrri-tqrh', name: 'SALE מאווררי תקרה' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/standing-fan', name: 'מאווררי עמוד וקיר' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/air-coolers', name: 'מצנני אוויר' },
+  { url: 'https://www.semicom.co.il/ceiling-fans/mavvrrim-tewiitiim', name: 'מאווררי תקרה תעשייתיים' },
+  { url: 'https://www.semicom.co.il/tools', name: 'כלי עבודה' },
+  { url: 'https://www.semicom.co.il/tools/power-tools', name: 'כלי עבודה חשמליים' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/mavregot-ve-mikdachot', name: 'מברגות ומקדחות' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/patishonim', name: 'פטישונים' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/meshazot', name: 'משחזות' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/masorim', name: 'מסורים' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/multitool-ve-kelim-rav-tachlitiyim', name: 'מולטיטול וכלים רב-תכליתיים' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/maltashot', name: 'מלטשות' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/generatorim', name: 'גנרטורים' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/kompresorim', name: 'קומפרסורים' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/knanot-harama', name: 'כננות הרמה' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/stim-ve-kitim', name: 'סטים וקיטים' },
+  { url: 'https://www.semicom.co.il/tools/power-tools/solalot-ve-metaanim', name: 'סוללות ומטענים' },
+  { url: 'https://www.semicom.co.il/tools/klei-ginun', name: 'כלי גינון' },
+  { url: 'https://www.semicom.co.il/tools/klei-ginun/mefuchim-ve-shoavei-alim', name: 'מפוחים ושואבי עלים' },
+  { url: 'https://www.semicom.co.il/tools/klei-ginun/mechasot-deshe', name: 'מכסחות דשא' },
+  { url: 'https://www.semicom.co.il/tools/klei-ginun/mesorei-sharsheret', name: 'מסורי שרשרת' },
+  { url: 'https://www.semicom.co.il/tools/klei-ginun/harmashim-hashmaliim', name: 'חרמשים חשמליים' },
+  { url: 'https://www.semicom.co.il/tools/klei-ginun/gozmei-geder', name: 'גוזמי גדר' },
+  { url: 'https://www.semicom.co.il/tools/klei-ginun/washing-machines', name: 'מכונות שטיפה' },
+  { url: 'https://www.semicom.co.il/tools/klei-ginun/tziyud-ginun-ve-avizarim', name: 'ציוד גינון ואביזרים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools', name: 'כלי עבודה ידניים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/work-pistols', name: 'אקדחי עבודה' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/golf-wires', name: 'גולפי חוטים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/measuring-tools', name: 'כלי מדידה' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/screwdrivers', name: 'מברגים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/power-tools', name: 'מסורים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/scissors', name: 'מספריים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/different-keys', name: 'מפתחות שונים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/cutting-knife', name: 'סכינים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/boxot', name: 'סט בוקסות' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/hammers-and-axes', name: 'פטישים וגרזנים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/pliers', name: 'פליירים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/cutters', name: 'קטרים' },
+  { url: 'https://www.semicom.co.il/tools/hand-tools/clamps-and-cleav', name: 'קליבות ומלחציים' },
+  { url: 'https://www.semicom.co.il/tools/storage-and-carrying-of-tools', name: 'אחסון ונשיאת כלי עבודה' },
+  { url: 'https://www.semicom.co.il/tools/storage-and-carrying-of-tools/connyt', name: 'כונניות' },
+  { url: 'https://www.semicom.co.il/tools/storage-and-carrying-of-tools/toolboxes', name: 'ארגזי כלים' },
+  { url: 'https://www.semicom.co.il/tools/storage-and-carrying-of-tools/tool-bags', name: 'תיקים לכלי עבודה' },
+  { url: 'https://www.semicom.co.il/tools/ladders', name: 'סולמות' },
+  { url: 'https://www.semicom.co.il/tools/carts-for-tools', name: 'עגלות' },
+  { url: 'https://www.semicom.co.il/tools/desktops-and-support', name: 'שולחנות עבודה ותמיכה' },
+  { url: 'https://www.semicom.co.il/tools/accessories-for-tools', name: 'ציוד עבודה ואביזרים לכלי עבודה' },
+  { url: 'https://www.semicom.co.il/tools/accessories-for-tools/sonicraft-accessories', name: 'אביזרים לסוניקרפטר' },
+  { url: 'https://www.semicom.co.il/tools/accessories-for-tools/polishing-and-grinding-products', name: 'מוצרי ליטוש והשחזה' },
+  { url: 'https://www.semicom.co.il/tools/accessories-for-tools/chisels', name: 'מקדחים ואזמלים' },
+  { url: 'https://www.semicom.co.il/tools/accessories-for-tools/drill-adapters', name: 'מתאמים למקדחה' },
+  { url: 'https://www.semicom.co.il/tools/accessories-for-tools/set-of-bits', name: 'סט ביטים' },
+  { url: 'https://www.semicom.co.il/tools/marct-nitor', name: 'מערכות ניטור' },
+  { url: 'https://www.semicom.co.il/tools/soldering-equipment', name: 'ציוד הלחמה' },
+  { url: 'https://www.semicom.co.il/tools/magnifying-glass', name: 'זכוכית מגדלת' },
+  { url: 'https://www.semicom.co.il/tools/protective-equipment-for-work', name: 'ציוד מיגון לעבודה' },
+  { url: 'https://www.semicom.co.il/tools/locks-and-safes', name: 'מנעולים וכספות' },
+  { url: 'https://www.semicom.co.il/tools/zip-tie', name: 'אזיקונים' },
+  { url: 'https://www.semicom.co.il/tools/kli-ebvdh-sale', name: 'כלי עבודה SALE' },
+  { url: 'https://www.semicom.co.il/lighting', name: 'תאורה' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting', name: 'תאורת פנים' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/pendant-lights', name: 'מנורות תלויות' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/indoor-wall-lights', name: 'מנורות קיר פנים' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/flush-ceiling-lights', name: 'מנורות צמודות תקרה' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/recessed-spotlights', name: 'ספוטים שקועים לתקרה' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/cylinder-spotlights', name: 'ספוטים צילינדרים' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/track-lighting', name: 'פסי צבירה לתאורה' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/magnetic-lighting', name: 'תאורה מגנטית' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/standing-table-lamps', name: 'מנורות עומדות ושולחן' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/led-panels', name: 'פאנלים LED' },
+  { url: 'https://www.semicom.co.il/lighting/indoor-lighting/led-strips', name: 'פסי לד' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting', name: 'תאורת חוץ' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting/garden-lighting', name: 'תאורה לגינה' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting/outdoor-wall-lights', name: 'מנורות קיר חוץ' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting/waterproof-ceiling-lights', name: 'צמודי תקרה מוגני מים' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting/floodlights', name: 'פרוז׳קטורים ותאורת הצפה' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting/waterproof-led-strips', name: 'פסי לד מוגני מים' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting/motion-sensor-lighting', name: 'תאורה עם חיישן תנועה' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting/solar-lighting', name: 'תאורה סולארית' },
+  { url: 'https://www.semicom.co.il/lighting/outdoor-lighting/string-lights', name: 'גרילנדות תאורה' },
+  { url: 'https://www.semicom.co.il/lighting/emergency-and-safety-lighting', name: 'תאורת חירום ובטיחות' },
+  { url: 'https://www.semicom.co.il/lighting/emergency-and-safety-lighting/emergency-lighting', name: 'תאורת חירום' },
+  { url: 'https://www.semicom.co.il/lighting/emergency-and-safety-lighting/exit-signs', name: 'שלטי יציאה' },
+  { url: 'https://www.semicom.co.il/lighting/light-bulbs', name: 'נורות' },
+  { url: 'https://www.semicom.co.il/lighting/light-bulbs/e27-bulbs', name: 'נורות E27' },
+  { url: 'https://www.semicom.co.il/lighting/light-bulbs/e14-bulbs', name: 'נורות E14' },
+  { url: 'https://www.semicom.co.il/lighting/light-bulbs/gu10-bulbs', name: 'נורות G' },
+  { url: 'https://www.semicom.co.il/lighting/light-bulbs/fluorescent-bulbs', name: 'נורות T8' },
+  { url: 'https://www.semicom.co.il/lighting/flashlights', name: 'פנסים' },
+  { url: 'https://www.semicom.co.il/lighting/flashlights/handheld-flashlights', name: 'פנסי יד' },
+  { url: 'https://www.semicom.co.il/lighting/flashlights/headlamps', name: 'פנסי ראש' },
+  { url: 'https://www.semicom.co.il/lighting/flashlights/work-lights', name: 'פנסי עבודה' },
+  { url: 'https://www.semicom.co.il/lighting/industrial-lighting', name: 'תאורה תעשייתית' },
+  { url: 'https://www.semicom.co.il/lighting/industrial-lighting/industrial-led-panels', name: 'פאנלים תעשייתיים' },
+  { url: 'https://www.semicom.co.il/lighting/industrial-lighting/warehouse-lighting', name: 'תאורת מחסנים' },
+  { url: 'https://www.semicom.co.il/lighting/industrial-lighting/industrial-floodlights', name: 'פרוז׳קטורים תעשייתיים' },
+  { url: 'https://www.semicom.co.il/lighting/industrial-lighting/parking-lot-lighting', name: 'תאורת חניונים' },
+  { url: 'https://www.semicom.co.il/lighting/sale-gvpi-tavrh', name: 'SALE גופי תאורה' },
+  { url: 'https://www.semicom.co.il/bath-accessories', name: 'אביזרי אמבטיה' },
+  { url: 'https://www.semicom.co.il/bath-accessories/bath-accessories', name: 'אביזרי אמבטיה' },
+  { url: 'https://www.semicom.co.il/bath-accessories/faucet', name: 'ברזים' },
+  { url: 'https://www.semicom.co.il/bath-accessories/shower-faucet-set', name: 'מוטות פינוק וסטים לאמבטיה' },
+  { url: 'https://www.semicom.co.il/bath-accessories/electric-water-heater', name: 'מחמם מים חשמלי' },
+  { url: 'https://www.semicom.co.il/bath-accessories/mravt-ld', name: 'מראות לד' },
+  { url: 'https://www.semicom.co.il/bath-accessories/bida', name: 'בידה מושב אסלה' },
+  { url: 'https://www.semicom.co.il/bath-accessories/abizri-ambtih-sale', name: 'אביזרי אמבטיה SALE' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile', name: 'מולטימדיה וסלולר' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/computer-accessories', name: 'אביזרי מחשב' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/computer-accessories/computer-mouse', name: 'עכברים למחשב' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/computer-accessories/computer-sets', name: 'סטים למחשב' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/headphones', name: 'אוזניות' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/cables', name: 'כבלים' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/memory-cards', name: 'כרטיסי זיכרון' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/chargers-and-cables', name: 'מטענים וכבלים' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/phone-stands', name: 'מעמדים לטלפונים' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/viewing-and-audio-systems', name: 'רמקולים ואודיו' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/backup-batteries', name: 'סוללות גיבוי' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/office-products', name: 'מוצרי משרד' },
+  { url: 'https://www.semicom.co.il/multimedia-and-mobile/monitors', name: 'אינטרקום' },
+  { url: 'https://www.semicom.co.il/tvs', name: 'טלוויזיות' },
+  { url: 'https://www.semicom.co.il/tvs/tvs', name: 'טלוויזיות' },
+  { url: 'https://www.semicom.co.il/tvs/tv-hanging-facilities', name: 'מתקני תלייה לטלוויזיה' },
+  { url: 'https://www.semicom.co.il/tvs/kablim-tv', name: 'כבלים' },
+  { url: 'https://www.semicom.co.il/electric-house', name: 'חשמל חכם' },
+  { url: 'https://www.semicom.co.il/electric-house/electric-house-wi-fi-semicom-smart', name: 'בית חכם Wi-Fi Semicom Smart' },
+  { url: 'https://www.semicom.co.il/electric-house/electric-house-wi-fi-semicom-smart/smart-switches-semicom-smart', name: 'מתגים חכמים Semicom Smart' },
+  { url: 'https://www.semicom.co.il/electric-house/electric-house-wi-fi-semicom-smart/wireless-security-camera-semicom-smart', name: 'מצלמת אבטחה אלחוטית Semicom Smart' },
+  { url: 'https://www.semicom.co.il/electric-house/electric-house-wi-fi-semicom-smart/related-products-semicom-smart', name: 'מוצרים נלווים  Semicom Smart' },
+  { url: 'https://www.semicom.co.il/electric-house/bit-hkm-semicom-smart-zigbee', name: 'בית חכם Semicom Smart ZigBee' },
+  { url: 'https://www.semicom.co.il/electric-house/bit-hkm-semicom-smart-zigbee/mtgim-hkmim-semicom-smart-zigbee', name: 'מתגים חכמים Semicom Smart ZigBee' },
+  { url: 'https://www.semicom.co.il/electric-house/bit-hkm-semicom-smart-zigbee/mvcrim-nlvvim-semicom-smart-zigbee', name: 'מוצרים נלווים Semicom Smart ZigBee' },
+  { url: 'https://www.semicom.co.il/electrical-accessories', name: 'אביזרי חשמל' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/detectors', name: 'גלאי עשן' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/timers', name: 'טיימרים' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/industrial-cables', name: 'כבלים לתעשייה' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/surge-protector-wall-tap', name: 'מגני ברקים' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/blowers-for-industry-and-construction', name: 'מפוחים לתעשייה ובנייה' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/power-strip', name: 'מפצלים' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/doorbells', name: 'פעמוני דלת' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/multi-sokets', name: 'רבי שקע' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/sockets-and-switches', name: 'שקעים ומפסקים' },
+  { url: 'https://www.semicom.co.il/electrical-accessories/drums-and-extension-cables', name: 'תופים וכבלים מאריכים' },
+  { url: 'https://www.semicom.co.il/projects-lighting', name: 'פרוייקטים' },
+  { url: 'https://www.semicom.co.il/projects-lighting/mavvrrim-tewiitim', name: 'מאווררים תעשייתיים' },
+  { url: 'https://www.semicom.co.il/projects-lighting/profiles', name: 'פרופילים' },
+  { url: 'https://www.semicom.co.il/projects-lighting/professional-track-lighting', name: 'פסי צבירה מקצועיים' },
+  { url: 'https://www.semicom.co.il/projects-lighting/professional-recessed-lighting', name: 'שקועי תקרה מקצועיים' },
+  { url: 'https://www.semicom.co.il/projects-lighting/warehouse-lighting-projects', name: 'תאורת מחסנים' },
+  { url: 'https://www.semicom.co.il/projects-lighting/emergency-lighting-projects', name: 'תאורת חירום' },
+  { url: 'https://www.semicom.co.il/projects-lighting/linear-lighting-projects', name: 'תאורה ליניארית' },
+  { url: 'https://www.semicom.co.il/projects-lighting/street-lighting-projects', name: 'תאורת רחוב' },
+  { url: 'https://www.semicom.co.il/projects-lighting/armatures-projects', name: 'ארמטורה' },
+  { url: 'https://www.semicom.co.il/projects-lighting/professional-flood-lighting', name: 'תאורת הצפה מקצועית' },
+  { url: 'https://www.semicom.co.il/new', name: 'חדש' },
+];
 
 async function scrapeSemicomCategory(page, categoryUrl, categoryName) {
   const products = [];
@@ -560,10 +759,13 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName) {
     }
 
     const items = await page.evaluate(() => {
-      return [...document.querySelectorAll('li.item.product.product-item')].map(card => {
-        const linkEl = card.querySelector('.product-item-name a.product-item-link');
-        const priceEl = card.querySelector('.price-wrapper[data-price-amount]');
-        const imgEl = card.querySelector('img.product-image-photo');
+      // li.item.product.product-item הוא הדפוס הרגיל של Magento, עם גיבוי
+      // ל-li.product-item למקרה שהערכה משתמשת בפחות מחלקות על אותו רכיב.
+      const cards = document.querySelectorAll('li.item.product.product-item, li.product-item');
+      return [...cards].map(card => {
+        const linkEl = card.querySelector('.product-item-name a.product-item-link, a.product-item-link');
+        const priceEl = card.querySelector('.price-wrapper[data-price-amount], [data-price-amount]');
+        const imgEl = card.querySelector('img.product-image-photo, img');
         const skuEl = card.querySelector('.sku-preview-text');
         return {
           title: linkEl?.textContent?.trim() || '',
@@ -609,11 +811,10 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName) {
 async function scrapeSemicom(page) {
   console.log('🔍 Scraping Semicom (כל האתר, לפי קטגוריות)...');
   const allProducts = [];
-  let categories = [];
+  const categories = SEMICOM_CATEGORIES;
 
   try {
-    categories = await collectSemicomCategoryUrls(page);
-
+    console.log(`  🔎 Semicom: ${categories.length} קטגוריות ברשימה הקבועה`);
     for (const cat of categories) {
       const catProducts = await scrapeSemicomCategory(page, cat.url, cat.name);
       allProducts.push(...catProducts);
