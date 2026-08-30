@@ -739,7 +739,7 @@ const SEMICOM_CATEGORIES = [
   { url: 'https://www.semicom.co.il/new', name: 'חדש' },
 ];
 
-async function scrapeSemicomCategory(page, categoryUrl, categoryName) {
+async function scrapeSemicomCategory(page, categoryUrl, categoryName, diagnostic = false) {
   const products = [];
   let pageNum = 1;
   let hasMore = true;
@@ -750,12 +750,35 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName) {
     if (seenPageUrls.has(url)) break;
     seenPageUrls.add(url);
 
+    let response = null;
     try {
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
+      response = await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
       await sleep(1500);
     } catch (e) {
       console.error(`    ⚠️ Semicom "${categoryName}" עמוד ${pageNum} שגיאת טעינה:`, e.message);
       break;
+    }
+
+    // אבחון חד-פעמי: מה בדיוק חוזר מהשרת בפועל (סטטוס HTTP, כותרת, קטע מהטקסט)
+    if (diagnostic && pageNum === 1) {
+      try {
+        const diag = await page.evaluate(() => ({
+          title: document.title,
+          bodyLen: document.body ? document.body.innerText.length : 0,
+          bodySnippet: document.body ? document.body.innerText.slice(0, 300).replace(/\s+/g, ' ') : '',
+          hasProductGrid: !!document.querySelector('.products-grid, .products.wrapper'),
+          hasCloudflareChallenge: /just a moment|checking your browser|cf-browser-verification/i.test(document.body ? document.body.innerText : ''),
+        }));
+        console.log('  🩺 אבחון Semicom (עמוד ראשון בלבד):');
+        console.log('     HTTP status:', response ? response.status() : 'אין תגובה');
+        console.log('     כותרת הדף:', diag.title);
+        console.log('     יש products-grid בדף:', diag.hasProductGrid);
+        console.log('     חשד לאתגר Cloudflare:', diag.hasCloudflareChallenge);
+        console.log('     אורך טקסט הגוף:', diag.bodyLen);
+        console.log('     תחילת הטקסט:', diag.bodySnippet);
+      } catch (e) {
+        console.log('  🩺 אבחון נכשל:', e.message);
+      }
     }
 
     const items = await page.evaluate(() => {
@@ -766,7 +789,7 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName) {
         const linkEl = card.querySelector('.product-item-name a.product-item-link, a.product-item-link');
         const priceEl = card.querySelector('.price-wrapper[data-price-amount], [data-price-amount]');
         const imgEl = card.querySelector('img.product-image-photo, img');
-        const skuEl = card.querySelector('.sku-preview-text');
+        const skuEl = card.querySelector('.sku-preview'); // מאומת מול האתר בפועל
         return {
           title: linkEl?.textContent?.trim() || '',
           url: linkEl?.href || '',
@@ -798,8 +821,15 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName) {
       });
     }
 
-    const hasNext = await page.$('.pages a.action.next');
-    hasMore = !!hasNext && items.length > 0;
+    // רוב הקטגוריות בסמיקום מחזירות את כל המוצרים בעמוד אחד (בלי פאגינציה
+    // כלל — מאומת מול האתר). בודקים כמה וריאציות נפוצות של כפתור "הבא"
+    // בכל זאת, למקרה שקטגוריה גדולה יותר כן מפגינת.
+    const hasNext = await page.evaluate(() => {
+      return !!document.querySelector(
+        '.pages a.action.next, .pages-item-next a, a.action.next:not(.disabled), li.pages-item-next a'
+      );
+    });
+    hasMore = hasNext && items.length > 0;
     pageNum++;
     if (pageNum > 30) break; // הגנת לולאה אינסופית
     await sleep(1000);
@@ -815,8 +845,13 @@ async function scrapeSemicom(page) {
 
   try {
     console.log(`  🔎 Semicom: ${categories.length} קטגוריות ברשימה הקבועה`);
+
+    // אבחון מוקדם מול קטגוריה שידוע בוודאות שיש בה מוצרים (אומת ידנית בדפדפן)
+    console.log('  🩺 בודק קודם קטגוריית בקרה ידועה (בלנדרים) לפני הסריקה המלאה...');
+    await scrapeSemicomCategory(page, 'https://www.semicom.co.il/appliances/kitchen-appliances/blenders', 'בדיקת בקרה', true);
+
     for (const cat of categories) {
-      const catProducts = await scrapeSemicomCategory(page, cat.url, cat.name);
+      const catProducts = await scrapeSemicomCategory(page, cat.url, cat.name, false);
       allProducts.push(...catProducts);
       await sleep(800);
     }
