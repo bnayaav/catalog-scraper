@@ -8,6 +8,78 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// ── Cloudflare R2 — אחסון תמונות מוצרים ──
+// למה: Railway (ששם רץ comphone-admin) חסום ע"י ה-Cloudflare של סמיקום,
+// ולכן לא מצליח למשוך תמונות ישירות מ-semicom.co.il. המחשב הזה כן נגיש
+// לסמיקום (אין עליו חסימה), אז הוא מוריד את התמונה בפועל ומעלה אותה
+// ל-R2 (אחסון קבצים של Cloudflare) — ומשם Railway יכול למשוך אותה בלי בעיה,
+// כי R2 הוא לא semicom.co.il.
+const { S3Client, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const crypto = require('crypto');
+
+const R2_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || ''; // אותו חשבון Cloudflare כמו ה-KV
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID || '';
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY || '';
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || '';
+const R2_PUBLIC_URL = 'https://pub-4a01358c90944b36bd21052597d0c34f.r2.dev'; // כתובת הגישה הציבורית של ה-bucket
+
+const r2Configured = () => !!(R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET_NAME);
+const r2Client = r2Configured() ? new S3Client({
+  region: 'auto',
+  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
+}) : null;
+
+// מפתח קבוע לפי hash של כתובת התמונה המקורית — כך ריצות חוזרות משתמשות
+// שוב באותו קובץ ב-R2 במקום להעלות אותו דבר כל יום מחדש.
+function r2KeyForImage(imgUrl) {
+  const hash = crypto.createHash('sha1').update(imgUrl).digest('hex');
+  const ext = (imgUrl.match(/\.(jpg|jpeg|png|webp|gif)(\?|$)/i) || [, 'jpg'])[1].toLowerCase();
+  return `semicom/${hash}.${ext}`;
+}
+
+async function objectExistsInR2(key) {
+  try {
+    await r2Client.send(new HeadObjectCommand({ Bucket: R2_BUCKET_NAME, Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * מוריד תמונת מוצר ומעלה אותה ל-R2. מחזיר את הכתובת הציבורית ב-R2,
+ * או את הכתובת המקורית כגיבוי אם ההעלאה נכשלה (עדיף מאשר לאבד את התמונה).
+ */
+async function mirrorImageToR2(imgUrl) {
+  if (!imgUrl || !r2Configured()) return imgUrl;
+  const key = r2KeyForImage(imgUrl);
+
+  try {
+    if (await objectExistsInR2(key)) return `${R2_PUBLIC_URL}/${key}`; // כבר הועלה בעבר — לא מורידים שוב
+
+    const res = await fetch(imgUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8',
+        'Referer': 'https://www.semicom.co.il/',
+      },
+    });
+    if (!res.ok) return imgUrl;
+    const contentType = res.headers.get('content-type') || 'image/jpeg';
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0) return imgUrl;
+
+    await r2Client.send(new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME, Key: key, Body: buf, ContentType: contentType,
+    }));
+    return `${R2_PUBLIC_URL}/${key}`;
+  } catch (e) {
+    console.error(`    ⚠️ R2 upload נכשל עבור ${imgUrl}:`, e.message);
+    return imgUrl; // גיבוי: לפחות הכתובת המקורית, גם אם Railway לא יוכל למשוך אותה
+  }
+}
+
 // ── הגדרות ──
 const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
 const CF_KV_NAMESPACE = process.env.CF_KV_NAMESPACE;
@@ -805,11 +877,12 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName, diagnostic
 
     for (const item of items) {
       const priceNum = Math.round(parseFloat(item.priceAmount) || 0); // מחיר ספק גולמי, בלי רווח
+      const mirroredImg = await mirrorImageToR2(item.img); // מעלה ל-R2 כדי ש-Railway יוכל לגשת אליה
       products.push({
         title: item.title,
         price: priceNum ? `${priceNum} ₪` : '',
         priceNum,
-        img: item.img,
+        img: mirroredImg,
         url: item.url,
         type: detectType(item.title),
         supplier: 'Semicom',
@@ -1052,6 +1125,9 @@ async function saveToKV(newProducts) {
 
 async function main() {
   console.log('🚀 Starting catalog scrape:', new Date().toLocaleString('he-IL'));
+  console.log(r2Configured()
+    ? '🖼️  R2 מוגדר — תמונות סמיקום יועלו ל-' + R2_PUBLIC_URL
+    : '⚠️  R2 לא מוגדר — תמונות סמיקום יישארו בכתובת המקורית (וייתכן שלא יעבדו מ-Railway)');
 
   const browser = await puppeteer.launch({
     headless: 'new',
