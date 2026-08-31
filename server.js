@@ -700,6 +700,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   ensureDataDir();
+  console.log('🔖 גרסת קוד: DEBUG-BUILD-2026-08-31-v3 (עם לוגי istores מפורטים)');
   console.log(`ComPhone Admin רץ על פורט ${PORT}`);
   const miss = missingConfig();
   if (miss.length) console.warn('אזהרה: חסרים משתני סביבה: ' + miss.join(', '));
