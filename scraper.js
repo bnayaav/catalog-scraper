@@ -879,9 +879,15 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName, diagnostic
       // ל-li.product-item למקרה שהערכה משתמשת בפחות מחלקות על אותו רכיב.
       const cards = document.querySelectorAll('li.item.product.product-item, li.product-item');
       return [...cards].map(card => {
-        const linkEl = card.querySelector('.product-item-name a.product-item-link, a.product-item-link');
-        const priceEl = card.querySelector('.price-wrapper[data-price-amount], [data-price-amount]');
-        const imgEl = card.querySelector('img.product-image-photo, img');
+        // כאן וגם בתמונה למטה — חיפוש נפרד ומודרג, לא querySelector משולב
+        // עם פסיק (זה לא באמת מבטיח עדיפות; זה לוקח את מה שמופיע ראשון
+        // ב-HTML מבין כל האפשרויות, לא בהכרח את הרלוונטי ביותר).
+        const linkEl = card.querySelector('.product-item-name a.product-item-link') || card.querySelector('a.product-item-link');
+        const priceEl = card.querySelector('.price-wrapper[data-price-amount]') || card.querySelector('[data-price-amount]');
+        // חיפוש נפרד ומודרג — לא querySelector משולב עם פסיק, כי זה לא באמת
+        // מבטיח עדיפות ל-product-image-photo. לוגו מותג שמופיע קודם ב-HTML
+        // (לפני תמונת המוצר עצמה) "זוכה" בטעות אם משתמשים בסלקטור משולב.
+        const imgEl = card.querySelector('img.product-image-photo') || card.querySelector('img');
         const skuEl = card.querySelector('.sku-preview'); // מאומת מול האתר בפועל
         // מעדיפים data-src/data-original (התמונה האמיתית ב-lazy-load) על פני
         // src, כי src עלול עדיין להצביע על placeholder גנרי (למשל תמונת
