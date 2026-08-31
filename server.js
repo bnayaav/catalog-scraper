@@ -274,7 +274,7 @@ const istoresClient = {
     if (r.status === 429) { await new Promise(s => setTimeout(s, 1500)); return istoresClient.put(p, body); }
     const t = await r.text();
     let j = null; try { j = JSON.parse(t); } catch {}
-    if (!r.ok || (j && j.success === false)) throw new Error(`HTTP ${r.status} ${t.slice(0, 120)}`);
+    if (!r.ok || (j && j.success === false)) throw new Error(`HTTP ${r.status} ${t.slice(0, 500)}`);
     return j;
   },
   async post(p, body) {
@@ -282,7 +282,7 @@ const istoresClient = {
     if (r.status === 429) { await new Promise(s => setTimeout(s, 1500)); return istoresClient.post(p, body); }
     const t = await r.text();
     let j = null; try { j = JSON.parse(t); } catch {}
-    if (!r.ok || (j && j.success === false)) throw new Error(`HTTP ${r.status} ${t.slice(0, 120)}`);
+    if (!r.ok || (j && j.success === false)) throw new Error(`HTTP ${r.status} ${t.slice(0, 500)}`);
     return j;
   },
 };
