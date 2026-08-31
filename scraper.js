@@ -892,8 +892,9 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName, diagnostic
         // מעדיפים data-src/data-original (התמונה האמיתית ב-lazy-load) על פני
         // src, כי src עלול עדיין להצביע על placeholder גנרי (למשל תמונת
         // הבאנר של הקטגוריה) במוצרים שלא נכנסו לתצוגה לפני הגלילה.
-        const lazySrc = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('data-original') || imgEl?.getAttribute('data-lazy');
-        let img = lazySrc || imgEl?.src || '';
+        // חוזרים ל-src בלבד — זה מה שאומת בפועל מול האתר (הבלנדרים).
+        // ה-data-src לא בהכרח קיים בעיצוב הזה, וניסיון להעדיף אותו החזיר ריק.
+        let img = imgEl?.src || '';
         // הגנה: תמונות באנר של קטגוריה (לא מוצר) נראות כמו .../media/catalog/category/...
         if (/\/media\/catalog\/category\//i.test(img)) img = '';
         return {
@@ -906,7 +907,8 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName, diagnostic
       }).filter(p => p.title);
     });
 
-    console.log(`    Semicom "${categoryName}" עמוד ${pageNum}: ${items.length} מוצרים`);
+    const withImg = items.filter(p => p.img).length;
+    console.log(`    Semicom "${categoryName}" עמוד ${pageNum}: ${items.length} מוצרים (${withImg} עם תמונה)`);
     if (items.length === 0) break;
 
     for (const item of items) {
