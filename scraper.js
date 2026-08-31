@@ -853,6 +853,27 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName, diagnostic
       }
     }
 
+    // גלילה איטית לכל אורך הדף — כדי שתמונות lazy-load "יתעוררו" ויקבלו
+    // את ה-src האמיתי שלהן לפני שאנחנו קוראים את הנתונים. בלי זה, מוצרים
+    // שלא נכנסו לתצוגה מיד מקבלים placeholder גנרי במקום התמונה האמיתית.
+    try {
+      await page.evaluate(async () => {
+        await new Promise((resolve) => {
+          let total = 0;
+          const step = 500;
+          const timer = setInterval(() => {
+            window.scrollBy(0, step);
+            total += step;
+            if (total >= document.body.scrollHeight - window.innerHeight) {
+              clearInterval(timer);
+              resolve();
+            }
+          }, 120);
+        });
+      });
+      await sleep(800);
+    } catch { /* לא קריטי אם הגלילה נכשלת */ }
+
     const items = await page.evaluate(() => {
       // li.item.product.product-item הוא הדפוס הרגיל של Magento, עם גיבוי
       // ל-li.product-item למקרה שהערכה משתמשת בפחות מחלקות על אותו רכיב.
@@ -862,11 +883,18 @@ async function scrapeSemicomCategory(page, categoryUrl, categoryName, diagnostic
         const priceEl = card.querySelector('.price-wrapper[data-price-amount], [data-price-amount]');
         const imgEl = card.querySelector('img.product-image-photo, img');
         const skuEl = card.querySelector('.sku-preview'); // מאומת מול האתר בפועל
+        // מעדיפים data-src/data-original (התמונה האמיתית ב-lazy-load) על פני
+        // src, כי src עלול עדיין להצביע על placeholder גנרי (למשל תמונת
+        // הבאנר של הקטגוריה) במוצרים שלא נכנסו לתצוגה לפני הגלילה.
+        const lazySrc = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('data-original') || imgEl?.getAttribute('data-lazy');
+        let img = lazySrc || imgEl?.src || '';
+        // הגנה: תמונות באנר של קטגוריה (לא מוצר) נראות כמו .../media/catalog/category/...
+        if (/\/media\/catalog\/category\//i.test(img)) img = '';
         return {
           title: linkEl?.textContent?.trim() || '',
           url: linkEl?.href || '',
           priceAmount: priceEl?.getAttribute('data-price-amount') || '',
-          img: imgEl?.src || imgEl?.getAttribute('data-src') || '',
+          img,
           sku: skuEl?.textContent?.trim() || '',
         };
       }).filter(p => p.title);
