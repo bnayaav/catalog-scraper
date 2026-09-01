@@ -4,12 +4,17 @@ on:
   schedule:
     - cron: '0 4 * * *'
   workflow_dispatch:
+    inputs:
+      only_suppliers:
+        description: 'ריק = כל הספקים (ריצה יומית מלאה). אחרת שמות מופרדים בפסיק, למשל: samsung או samsung,atomic'
+        required: false
+        default: ''
 
 jobs:
   scrape:
     # רץ על ה-runner העצמאי (DESKTOP-T24MMUB) ולא על GitHub cloud runners:
-    # Semicom ועכשיו כנראה גם Samsung חסומים ע"י Cloudflare/Akamai על IP-ים
-    # של GitHub Actions הענן, אבל לא על ה-IP הביתי/עסקי של המחשב הזה.
+    # Semicom חסום ע"י Cloudflare על IP-ים של GitHub Actions הענן, אבל לא
+    # על ה-IP הביתי/עסקי של המחשב הזה.
     runs-on: [self-hosted, Windows]
     steps:
       - name: Checkout
@@ -42,7 +47,9 @@ jobs:
           ATOMIC_PASS: ${{ secrets.ATOMIC_PASS }}
           CMS_USER: ${{ secrets.CMS_USER }}
           CMS_PASS: ${{ secrets.CMS_PASS }}
-          # Samsung: אתר ציבורי, אין צורך בהתחברות/סודות
+          # Samsung: קובץ מקומי, אין צורך בהתחברות/סודות
+          # ריצה סלקטיבית — ריק כברירת מחדל בריצה המתוזמנת (מריץ הכול)
+          ONLY_SUPPLIERS: ${{ github.event.inputs.only_suppliers }}
         run: node scraper.js
 
       - name: Notify on failure
