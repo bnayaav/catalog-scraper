@@ -1166,6 +1166,18 @@ async function main() {
     ? '🖼️  R2 מוגדר — תמונות סמיקום יועלו ל-' + R2_PUBLIC_URL
     : '⚠️  R2 לא מוגדר — תמונות סמיקום יישארו בכתובת המקורית (וייתכן שלא יעבדו מ-Railway)');
 
+  // ── הרצה סלקטיבית ──
+  // ONLY_SUPPLIERS=samsung (או samsung,atomic וכו') מריץ רק את הספקים
+  // האלה — לא נוגע בשאר, ועדיין כותב ל-KV כרגיל (saveToKV ממילא מעדכן
+  // רק ספקים שבאמת נסרקו בריצה הזו). בלי המשתנה — מריץ הכול, כמו תמיד.
+  // שימושי כדי לרענן ספק אחד תוך שניות בלי לחכות לריצה המלאה (~שעתיים
+  // בעיקר בגלל סמיקום). דוגמת הרצה מקומית:
+  //   ONLY_SUPPLIERS=samsung node scraper.js
+  const ONLY = (process.env.ONLY_SUPPLIERS || '')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const shouldRun = (key) => ONLY.length === 0 || ONLY.includes(key);
+  if (ONLY.length) console.log('⚡ הרצה סלקטיבית — רק:', ONLY.join(', '));
+
   const browser = await puppeteer.launch({
     headless: 'new',
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -1179,32 +1191,50 @@ async function main() {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
 
     // Scrape each supplier
-    const cdata = await scrapeCData(page);
-    allProducts.push(...cdata);
+    if (shouldRun('cdata')) {
+      const cdata = await scrapeCData(page);
+      allProducts.push(...cdata);
+    }
 
-    const morlevi = await scrapeMorelevi(page);
-    allProducts.push(...morlevi);
+    if (shouldRun('morlevi')) {
+      const morlevi = await scrapeMorelevi(page);
+      allProducts.push(...morlevi);
+    }
 
-    const amtel = await scrapeAmtel(page);
-    allProducts.push(...amtel);
+    if (shouldRun('amtel')) {
+      const amtel = await scrapeAmtel(page);
+      allProducts.push(...amtel);
+    }
 
-    const techno = await scrapeTechnoRezef(page);
-    allProducts.push(...techno);
+    if (shouldRun('techno')) {
+      const techno = await scrapeTechnoRezef(page);
+      allProducts.push(...techno);
+    }
 
-    const atomic = await scrapeAtomic(page);
-    allProducts.push(...atomic);
+    if (shouldRun('atomic')) {
+      const atomic = await scrapeAtomic(page);
+      allProducts.push(...atomic);
+    }
 
-    const semicom = await scrapeSemicom(page);
-    allProducts.push(...semicom);
+    if (shouldRun('semicom')) {
+      const semicom = await scrapeSemicom(page);
+      allProducts.push(...semicom);
+    }
 
-    const cms = await scrapeCMS(page);
-    allProducts.push(...cms);
+    if (shouldRun('cms')) {
+      const cms = await scrapeCMS(page);
+      allProducts.push(...cms);
+    }
 
-    const hareli = await scrapeHareli(page);
-    allProducts.push(...hareli);
+    if (shouldRun('hareli')) {
+      const hareli = await scrapeHareli(page);
+      allProducts.push(...hareli);
+    }
 
-    const samsung = await scrapeSamsung(page);
-    allProducts.push(...samsung);
+    if (shouldRun('samsung')) {
+      const samsung = await scrapeSamsung(page);
+      allProducts.push(...samsung);
+    }
 
   } finally {
     await browser.close();
