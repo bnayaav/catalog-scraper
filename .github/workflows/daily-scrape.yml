@@ -7,6 +7,9 @@ on:
 
 jobs:
   scrape:
+    # רץ על ה-runner העצמאי (DESKTOP-T24MMUB) ולא על GitHub cloud runners:
+    # Semicom ועכשיו כנראה גם Samsung חסומים ע"י Cloudflare/Akamai על IP-ים
+    # של GitHub Actions הענן, אבל לא על ה-IP הביתי/עסקי של המחשב הזה.
     runs-on: [self-hosted, Windows]
     steps:
       - name: Checkout
@@ -28,9 +31,6 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_KV_NAMESPACE: ${{ secrets.CF_KV_NAMESPACE }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
           SCRAPER_USER: ${{ secrets.SCRAPER_USER }}
           CDATA_USER: ${{ secrets.CDATA_USER }}
           CDATA_PASS: ${{ secrets.CDATA_PASS }}
@@ -42,6 +42,7 @@ jobs:
           ATOMIC_PASS: ${{ secrets.ATOMIC_PASS }}
           CMS_USER: ${{ secrets.CMS_USER }}
           CMS_PASS: ${{ secrets.CMS_PASS }}
+          # Samsung: אתר ציבורי, אין צורך בהתחברות/סודות
         run: node scraper.js
 
       - name: Notify on failure
