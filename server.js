@@ -208,6 +208,73 @@ function imgSig(u) {
   return crypto.createHmac('sha256', SESSION_SECRET).update('img:' + u).digest('base64url');
 }
 
+// ── שיוך קטגוריות אמיתי לסמיקום — לפי שם הקטגוריה מהאתר (לא ניחוש סוג/מותג) ──
+// כל תת-הקטגוריות שנוצרות אוטומטית מקובצות תחת קטגוריית-שורש אחת ("סמיקום"),
+// כדי לא לפזר עשרות קטגוריות חדשות ישירות בתפריט הראשי של החנות.
+const SEMICOM_ROOT_CATEGORY_NAME = 'לבית משרד וגינה';
+
+function makeSemicomCategorizer(istores) {
+  const createdCache = new Map(); // שם מנורמל → id, נמנע מיצירה כפולה באותה ריצה
+  let rootId = null;
+
+  async function ensureRoot(categories) {
+    if (rootId) return rootId;
+    const norm = SEMICOM_ROOT_CATEGORY_NAME.trim().toLowerCase();
+    const existing = categories.find((c) => !c.parent && (c.name || '').trim().toLowerCase() === norm);
+    if (existing) { rootId = existing.id; return rootId; }
+    try {
+      const created = await istores.post('/categories', {
+        category_description: { 3: { name: SEMICOM_ROOT_CATEGORY_NAME } },
+        parent_id: 0,
+        status: 1,
+      });
+      const newId = Number(created?.category_id ?? created?.id ?? created?.response?.category_id ?? 0) || null;
+      if (newId) {
+        rootId = newId;
+        categories.push({ id: rootId, name: SEMICOM_ROOT_CATEGORY_NAME, parent: 0 });
+        console.log(`[semicom categorize] נוצרה קטגוריית שורש "${SEMICOM_ROOT_CATEGORY_NAME}" (id ${rootId})`);
+      } else {
+        console.error('[semicom categorize] יצירת קטגוריית שורש לא החזירה id:', JSON.stringify(created));
+      }
+    } catch (e) {
+      console.error('[semicom categorize] יצירת קטגוריית שורש נכשלה:', e.message);
+    }
+    return rootId;
+  }
+
+  return async function categorize(categories, p) {
+    const name = (p.category || '').trim();
+    if (!name) return [];
+    const norm = name.toLowerCase();
+
+    // כבר קיימת קטגוריה בחנות עם השם הזה בדיוק — משתמשים בה
+    const exact = categories.find((c) => (c.name || '').trim().toLowerCase() === norm);
+    if (exact) return [exact.id];
+
+    // כבר נוצרה באותה ריצה — לא יוצרים שוב
+    if (createdCache.has(norm)) return [createdCache.get(norm)];
+
+    const parentId = await ensureRoot(categories);
+    try {
+      const created = await istores.post('/categories', {
+        category_description: { 3: { name } },
+        parent_id: parentId || 0,
+        status: 1,
+      });
+      const newId = Number(created?.category_id ?? created?.id ?? created?.response?.category_id ?? 0) || null;
+      if (newId) {
+        createdCache.set(norm, newId);
+        categories.push({ id: newId, name, parent: parentId || 0 });
+        return [newId];
+      }
+      console.error(`[semicom categorize] יצירת קטגוריה "${name}" לא החזירה id:`, JSON.stringify(created));
+    } catch (e) {
+      console.error(`[semicom categorize] יצירת קטגוריה "${name}" נכשלה:`, e.message);
+    }
+    return [];
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* סנכרון אוטומטי: Atomic → iStores                                    */
 /* ------------------------------------------------------------------ */
@@ -343,6 +410,7 @@ async function startSync(supplier, dryRun) {
       const stats = await runSync({
         istores: istoresClient, settings, categories, imgUrl: signedImg, log,
         fetchCatalog: src.fetchCatalog, sourceLabel: src.label,
+        categorize: supplier === 'semicom' ? makeSemicomCategorizer(istoresClient) : undefined,
       }, dryRun);
       job.stats = stats;
       log(`הסתיים · נוצרו ${stats.created} · עודכנו ${stats.updated} · אופסו ${stats.zeroed} · נכשלו ${stats.failed}`);
