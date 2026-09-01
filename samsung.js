@@ -1,128 +1,97 @@
 // ═══════════════════════════════════════════════════════════
-// samsung.js — סורק קטלוג Samsung Israel (samsung.com/il)
+// samsung.js — קטלוג Samsung Israel, נטען מקובץ HTML מקומי
 // שייך ל-repo: catalog-scraper
 //
-// ⚠️ טיוטה ראשונה — הסלקטורים מבוססים על מבנה סטנדרטי של אתרי
-// Samsung אזוריים (pd19-* / data-testid) ולא אומתו בדפדפן אמיתי.
-// יש להריץ workflow_dispatch ידני ולבדוק ב-DevTools (F12) בדיוק
-// כמו שעשינו עם Semicom (.sku-preview) לפני ריצה יומית אוטומטית.
+// שינוי גישה (אחרי שניסיון סריקה חיה מול samsung.com/il החזיר 0
+// מוצרים בכל הקטגוריות): לא סורקים יותר את האתר החי. במקום זה,
+// קטלוג המוצרים (448 מוצרים, 19 קטגוריות, 4 קבוצות) שמור כקובץ
+// HTML סטטי ב-repo עצמו: data/samsung_il_catalog.html — אתה מעדכן
+// אותו ידנית מתי שתרצה (למשל פעם ברבעון), וה-scraper רק *קורא*
+// אותו בכל ריצה יומית ומייצא ל-KV. אין תלות ברשת/בהגנת בוט בכלל,
+// אז זה גם לא צריך את ה-self-hosted runner מבחינת סמסונג עצמו
+// (עדיין ירוץ שם כי סמיקום צריך את זה).
 //
-// samsung.com/il ככל הנראה מוגן ע"י Akamai/Cloudflare ברמה גבוהה,
-// בדומה ל-semicom.co.il → אם GitHub Actions הענן נחסם, יש להריץ על
-// ה-self-hosted runner (DESKTOP-T24MMUB), בדיוק כמו Semicom.
+// מבנה הקובץ (מאומת מול הקובץ שהעלית):
+//   div.group          → קבוצה עליונה (מובייל / טלוויזיה ואודיו / ...)
+//     h2                 שם הקבוצה + מונה, למשל "מובייל(220)"
+//     section.category → קטגוריה (19 בסך הכול)
+//       h3                שם הקטגוריה + מונה, למשל "סמארטפונים(34)"
+//       a.card          → כרטיס מוצר (448 בסך הכול)
+//         .card-img img   תמונת המוצר
+//         .card-name      שם המוצר
+//         .card-price     מחיר (מתעלמים ממנו בכוונה — ראו הערה למטה)
 //
-// עקרון "ללא מחירים": המוצרים נכתבים ל-KV בלי מחיר אמיתי
-// (priceNum: 0). ה"צרו קשר בוואטסאפ" לא מטופל כאן — הוא מטופל
-// ב-sync.js (comphone-admin) דרך noPriceMode:'contact' +
-// noPriceText, שמוסיף את התווית לשם המוצר בזמן הסנכרון ל-iStores.
-// כך שינוי מספר הוואטסאפ נעשה במקום אחד (הגדרות הסנכרון), לא כאן.
+// עקרון "ללא מחירים": בכוונה **מתעלמים** משדה card-price בקובץ,
+// גם אם יש שם מחיר אמיתי — כל מוצר סמסונג יוצא מכאן עם priceNum:0.
+// התווית שמוצגת בפועל בחנות ("לבדיקת זמינות ומחיר...") מוגדרת
+// במקום מרוכז אחד: SAMSUNG_SETTINGS_OVERRIDES.noPriceText, בקובץ
+// samsung.js של comphone-admin — לא כאן. כך שינוי הטקסט/הטלפון
+// לא דורש נגיעה בסורק או בקובץ הקטלוג.
 // ═══════════════════════════════════════════════════════════
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const path = require('path');
 
-// קטגוריות שורש — לפי מבנה תפריט טיפוסי של samsung.com/il.
-// יש להשלים/לאמת כתובות מדויקות מול תפריט הניווט באתר עצמו,
-// כמו שעשינו עם 229 ה-URLs של Semicom.
-const SAMSUNG_CATEGORIES = [
-  { url: 'https://www.samsung.com/il/smartphones/all-smartphones/', sub: 'סמארטפונים' },
-  { url: 'https://www.samsung.com/il/smartphones/galaxy-tab/all-galaxy-tab/', sub: 'טאבלטים' },
-  { url: 'https://www.samsung.com/il/watches/all-watches/', sub: 'שעונים חכמים' },
-  { url: 'https://www.samsung.com/il/mobile-accessories/all-mobile-accessories/', sub: 'אביזרים לנייד' },
-  { url: 'https://www.samsung.com/il/tvs/all-tvs/', sub: 'טלוויזיות' },
-  { url: 'https://www.samsung.com/il/audio-devices/all-audio-devices/', sub: 'אודיו' },
-  { url: 'https://www.samsung.com/il/monitors/all-monitors/', sub: 'מוניטורים' },
-  { url: 'https://www.samsung.com/il/refrigerators/all-refrigerators/', sub: 'מקררים' },
-  { url: 'https://www.samsung.com/il/washers-and-dryers/all-washers-and-dryers/', sub: 'מכונות כביסה וייבוש' },
-  { url: 'https://www.samsung.com/il/air-conditioners/all-air-conditioners/', sub: 'מזגנים' },
-  { url: 'https://www.samsung.com/il/vacuum-cleaners/all-vacuum-cleaners/', sub: 'שואבי אבק' },
-  { url: 'https://www.samsung.com/il/cooking-appliances/all-cooking-appliances/', sub: 'מוצרי בישול' },
-];
-
-function mapType(sub) {
-  if (/סמארטפונ|טאבלט|שעונ|אביז/.test(sub)) return 'מובייל';
-  if (/טלוויז/.test(sub)) return 'טלוויזיה';
-  if (/אודיו/.test(sub)) return 'אודיו';
-  if (/מוניטור/.test(sub)) return 'מוניטור';
-  return 'מוצרי בית';
-}
+const CATALOG_FILE = path.join(__dirname, 'data', 'samsung_il_catalog.html');
 
 async function scrapeSamsung(page) {
-  console.log('🔍 Scraping Samsung Israel...');
+  console.log('🔍 Loading Samsung Israel catalog (local file)...');
   const products = [];
 
-  for (const cat of SAMSUNG_CATEGORIES) {
-    try {
-      console.log(`  → קטגוריה: ${cat.sub} (${cat.url})`);
-      await page.goto(cat.url, { waitUntil: 'networkidle2', timeout: 30000 });
-      await sleep(2500);
+  try {
+    await page.goto('file://' + CATALOG_FILE, { waitUntil: 'load', timeout: 15000 });
 
-      // גלילה + לחיצה על "הצג עוד" עד שכמות המוצרים מתייצבת
-      let lastCount = -1;
-      let stableRounds = 0;
-      for (let i = 0; i < 15 && stableRounds < 2; i++) {
-        await page.evaluate(() => {
-          const btn = [...document.querySelectorAll('button')].find(b =>
-            /הצג עוד|טען עוד|load more|show more/i.test(b.textContent || ''));
-          if (btn) btn.click();
-        });
-        const count = await page.evaluate(() =>
-          document.querySelectorAll('[data-testid="product-card"], .pd19-product-card, li.pd-list-item').length);
-        stableRounds = count === lastCount ? stableRounds + 1 : 0;
-        lastCount = count;
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await sleep(1200);
+    const raw = await page.evaluate(() => {
+      const clean = (s) => (s || '').replace(/\s*\(\d+\)\s*$/, '').trim();
+      const groups = [...document.querySelectorAll('.group')];
+      const out = [];
+      for (const g of groups) {
+        const groupName = clean(g.querySelector('h2')?.textContent || '');
+        const cats = [...g.querySelectorAll('section.category')];
+        for (const cat of cats) {
+          const catName = clean(cat.querySelector('h3')?.textContent || '');
+          const cards = [...cat.querySelectorAll('a.card')];
+          for (const card of cards) {
+            const img = card.querySelector('.card-img img');
+            const nameEl = card.querySelector('.card-name');
+            out.push({
+              title: nameEl?.textContent?.trim() || img?.getAttribute('alt') || '',
+              url: card.href || '',
+              img: img?.src || '',
+              group: groupName,
+              category: catName,
+            });
+          }
+        }
       }
+      return out;
+    });
 
-      const items = await page.evaluate(() => {
-        const cards = [...document.querySelectorAll(
-          '[data-testid="product-card"], .pd19-product-card, li.pd-list-item'
-        )];
-        return cards.map(el => {
-          const titleEl = el.querySelector(
-            '.pd19-product-card__name, [data-testid="product-card-title"], .pd-list-item__name, h3'
-          );
-          const imgEl = el.querySelector('img');
-          const linkEl = el.querySelector('a[href]');
-          const skuAttr = el.getAttribute('data-model-code') || el.getAttribute('data-model') || '';
+    console.log(`  📄 נקראו ${raw.length} מוצרים מהקובץ המקומי`);
 
-          return {
-            title: titleEl ? titleEl.textContent.trim() : '',
-            img: imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '',
-            url: linkEl ? linkEl.href : '',
-            sku: skuAttr,
-          };
-        }).filter(p => p.title);
+    for (const item of raw) {
+      if (!item.title) continue;
+      products.push({
+        title: item.title,
+        price: '',                   // בכוונה — התווית מתווספת ב-sync.js
+        priceNum: 0,                  // תמיד 0, גם אם בקובץ יש מחיר אמיתי
+        img: item.img,
+        url: item.url,
+        category: 'samsung',          // קטגוריית שורש קבועה בחנות
+        subCategory: item.category,   // אחת מ-19 הקטגוריות (סמארטפונים, טלוויזיות...)
+        group: item.group,            // רמת קיבוץ נוספת, לשימוש עתידי אם תרצה
+        supplier: 'Samsung',
+        brand: 'Samsung',
+        stock: 'זמין',
       });
-
-      console.log(`    ${cat.sub}: ${items.length} מוצרים`);
-
-      for (const item of items) {
-        products.push({
-          title: item.title,
-          price: '',                 // אין מחיר — תווית "צרו קשר" מתווספת ב-sync.js
-          priceNum: 0,
-          img: item.img,
-          url: item.url,
-          sku: item.sku,
-          type: mapType(cat.sub),
-          category: 'samsung',       // קטגוריית שורש קבועה בחנות
-          subCategory: cat.sub,
-          supplier: 'Samsung',
-          brand: 'Samsung',
-          stock: 'זמין',
-        });
-      }
-
-      await sleep(1500);
-    } catch (e) {
-      console.error(`  ❌ Samsung [${cat.sub}] error:`, e.message);
     }
+  } catch (e) {
+    console.error('  ❌ Samsung error:', e.message);
   }
 
-  // דדופ לפי SKU/כותרת (מוצר עלול לחזור בכמה קטגוריות)
+  // דדופ לפי URL (מוצר לא אמור לחזור פעמיים בקובץ, אבל ליתר ביטחון)
   const seen = new Set();
   const unique = products.filter(p => {
-    const key = p.sku || p.title;
+    const key = p.url || p.title;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
