@@ -137,7 +137,7 @@ async function scrapeCData(page) {
 
   try {
     // Login via direct HTTP POST (bypass Puppeteer WAF block)
-    await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'load', timeout: 30000 });
+    const loginResponse = await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'load', timeout: 30000 });
 
     // האתר כנראה מבוסס Angular ישן — ה-HTML הראשוני נטען מיד, אבל הטופס
     // בפועל מצטייר רק אחרי שה-JS מסיים לרוץ. sleep(3000) קבוע לא תמיד
@@ -147,7 +147,30 @@ async function scrapeCData(page) {
     console.log('    #Email found:', !!emailFound);
 
     if (!emailFound) {
-      console.log('  ⚠️ C-Data: WAF blocking GitHub IP, skipping');
+      // אבחון: מה בדיוק חזר מהשרת בפועל, כדי להבין אם זו חסימת WAF/
+      // Cloudflare אמיתית, בעיית timing, או שהעמוד פשוט השתנה. אותה
+      // גישה כמו האבחון שהיה לנו ב-scrapeSemicomCategory.
+      try {
+        const diag = await page.evaluate(() => ({
+          title: document.title,
+          bodyLen: document.body ? document.body.innerText.length : 0,
+          bodySnippet: document.body ? document.body.innerText.slice(0, 400).replace(/\s+/g, ' ') : '',
+          hasCloudflareChallenge: /just a moment|checking your browser|cf-browser-verification|attention required/i.test(document.body ? document.body.innerText : ''),
+          hasEmailAnywhere: !!document.querySelector('[id*="mail" i], [name*="mail" i], input[type="email"]'),
+          inputCount: document.querySelectorAll('input').length,
+        }));
+        console.log('  🩺 אבחון C-Data:');
+        console.log('     HTTP status:', loginResponse ? loginResponse.status() : 'אין תגובה');
+        console.log('     כותרת הדף:', diag.title);
+        console.log('     חשד לאתגר Cloudflare:', diag.hasCloudflareChallenge);
+        console.log('     יש שדה עם "mail" בשם/id בדף (בכל תבנית):', diag.hasEmailAnywhere);
+        console.log('     סה"כ שדות input בדף:', diag.inputCount);
+        console.log('     אורך טקסט הגוף:', diag.bodyLen);
+        console.log('     תחילת הטקסט:', diag.bodySnippet);
+      } catch (e) {
+        console.log('  🩺 אבחון נכשל:', e.message);
+      }
+      console.log('  ⚠️ C-Data: #Email לא נמצא — ראו אבחון למעלה, ייתכן שזו לא בהכרח חסימת WAF');
       return products;
     }
 
