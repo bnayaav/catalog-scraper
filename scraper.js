@@ -99,7 +99,7 @@ function detectType(title) {
 }
 
 function detectBrand(title) {
-  const brands = ['HP','Dell','ASUS','Apple','Lenovo','MSI','Acer','Samsung','Toshiba','LG','Microsoft','Gigabyte','Canon'];
+  const brands = ['HP','Dell','ASUS','Apple','Lenovo','MSI','Acer','Samsung','Toshiba','LG','Microsoft','Gigabyte'];
   const t = title.toUpperCase();
   return brands.find(b => t.includes(b.toUpperCase())) || '';
 }
@@ -163,6 +163,7 @@ async function scrapeCData(page) {
       { url: 'https://reseller.c-data.co.il/asus-laptops', type: 'נייד' },
       { url: 'https://reseller.c-data.co.il/hp-laptops', type: 'נייד' },
       { url: 'https://reseller.c-data.co.il/dell-laptops', type: 'נייד' },
+      { url: 'https://reseller.c-data.co.il/cameras-2#/pageSize=48&viewMode=grid&orderBy=15&pageNumber=1', type: 'מצלמות' },
     ];
 
     for (const cat of categories) {
@@ -170,7 +171,14 @@ async function scrapeCData(page) {
       let has_more = true;
 
       while (has_more) {
-        const url = page_num === 1 ? cat.url : `${cat.url}?page=${page_num}`;
+        // רוב הקטגוריות: ?page=N בסוף ה-URL. קטגוריית המצלמות היא אתר
+        // מבוסס hash-routing (#/pageSize=...&pageNumber=N) — שם צריך
+        // להחליף את pageNumber= בתוך ה-hash עצמו, לא להוסיף ?page=.
+        const url = page_num === 1
+          ? cat.url
+          : (/pageNumber=\d+/.test(cat.url)
+              ? cat.url.replace(/pageNumber=\d+/, 'pageNumber=' + page_num)
+              : `${cat.url}?page=${page_num}`);
         await page.goto(url, { waitUntil: 'networkidle2' });
         await sleep(2000);
 
