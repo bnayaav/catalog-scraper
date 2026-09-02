@@ -138,9 +138,12 @@ async function scrapeCData(page) {
   try {
     // Login via direct HTTP POST (bypass Puppeteer WAF block)
     await page.goto('https://reseller.c-data.co.il/Login', { waitUntil: 'load', timeout: 30000 });
-    await sleep(3000);
 
-    const emailFound = await page.$('#Email');
+    // האתר כנראה מבוסס Angular ישן — ה-HTML הראשוני נטען מיד, אבל הטופס
+    // בפועל מצטייר רק אחרי שה-JS מסיים לרוץ. sleep(3000) קבוע לא תמיד
+    // מספיק (וגם מבזבז זמן כשזה כן מהיר). מחכים בפועל עד שהשדה מופיע,
+    // עד 15 שניות, לפני שמוותרים.
+    const emailFound = await page.waitForSelector('#Email', { timeout: 15000 }).then(() => true).catch(() => false);
     console.log('    #Email found:', !!emailFound);
 
     if (!emailFound) {
