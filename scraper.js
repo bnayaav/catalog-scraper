@@ -99,7 +99,7 @@ function detectType(title) {
 }
 
 function detectBrand(title) {
-  const brands = ['HP','Dell','ASUS','Apple','Lenovo','MSI','Acer','Samsung','Toshiba','LG','Microsoft','Gigabyte'];
+  const brands = ['HP','Dell','ASUS','Apple','Lenovo','MSI','Acer','Samsung','Toshiba','LG','Microsoft','Gigabyte','Canon'];
   const t = title.toUpperCase();
   return brands.find(b => t.includes(b.toUpperCase())) || '';
 }
